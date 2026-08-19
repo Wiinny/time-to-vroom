@@ -402,6 +402,7 @@ func _on_save_pressed() -> void:
 	_track_data.nom = _title_edit.text.strip_edges()
 	_track_data.auteur = _author_edit.text.strip_edges()
 	_track_data.ensure_uid()
+	_track_data.ensure_date_ajout()
 	var err: Error = ResourceSaver.save(_track_data, _track_path)
 	if err != OK:
 		push_warning("TrackEditor: échec de sauvegarde de %s (%s)" % [_track_path, error_string(err)])

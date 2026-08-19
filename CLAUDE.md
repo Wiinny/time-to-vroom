@@ -370,13 +370,16 @@ ouvert le panneau via `open_for()`) / Supprimer. Piège rencontré :
 explicite après le refresh, créer plusieurs collections à la suite au
 clavier ne marchait qu'une fois sur deux.
 
-Dans `ui/track_select.gd`, le menu déroulant « Regrouper par : » (Toutes les
-pistes / Collections) fait basculer la colonne droite entre la liste plate
-et un **accordéon** : une entête par collection (`▸`/`▾`, compteur), une
-seule dépliée à la fois (`_expanded_collection`, cliquer une autre entête
-referme la précédente — demande explicite). Rien n'est présélectionné tant
-qu'aucune collection n'est dépliée. `ui/leaderboard.gd` gagne
-`clear_track()` (efface l'historique d'une piste, tous véhicules) et
+Dans `ui/track_select.gd`, le menu déroulant « Regrouper par : » fait
+basculer la colonne droite entre plusieurs présentations — voir
+« Regrouper par : douze modes de tri » plus bas dans Architecture pour le
+détail complet (à l'origine, seuls Toutes les pistes / Collections
+existaient ; ce paragraphe documente encore l'**accordéon** des
+collections, toujours en place tel quel). Une entête par collection
+(`▸`/`▾`, compteur), une seule dépliée à la fois (`_expanded_collection`,
+cliquer une autre entête referme la précédente — demande explicite). Rien
+n'est présélectionné tant qu'aucune collection n'est dépliée. `ui/leaderboard.gd`
+gagne `clear_track()` (efface l'historique d'une piste, tous véhicules) et
 `map/track_catalog.gd` gagne `delete_track()` (`DirAccess.remove_absolute`)
 pour ces actions.
 Piège rencontré : `Camera3D.look_at()` lit `global_transform`, qui n'est
@@ -841,6 +844,86 @@ ET ajouté une coloration verte du texte comme second indicateur — jugée
 inutile et mal rendue à l'usage (retour utilisateur direct), retirée :
 l'anneau de focus (désormais correctement positionné) reste le seul
 indicateur de sélection à l'ouverture du menu.
+
+**Regrouper par : douze modes de tri (`map/track_grouping.gd`,
+`map/track_data.gd`, `map/track_catalog.gd`, `ui/track_select.gd`).** Sur
+demande explicite, façon osu! : le menu « Regrouper par : » passe de 2 à 12
+entrées. La plupart affichent des **sections toujours dépliées** (pas
+l'accordéon des collections, qui reste le seul mode replié/déplié — voir
+plus haut) : un `Label` d'entête non interactif par section, suivi des
+lignes habituelles (`_build_track_row()`, inchangé). Trois entrées restent
+des placeholders désactivés (« Par date de création », « Par difficulté »,
+« Par note reçue »), suffixées « (bientôt disponible) », même patron que
+« Leaderboard en ligne » juste à côté — toutes trois demandent soit le
+site/backend (hors scope, CLAUDE.md), soit une mécanique déjà explicitement
+reportée (la difficulté « calculée rétroactivement, plus tard », badge
+neutre existant dans `_build_track_row()`).
+
+`map/track_grouping.gd` (`TrackGrouping`) porte toute la logique de
+section/tri, **statique et pure** : même contrainte de testabilité que
+`replay/ghost_resolver.gd` (`tools/run_tests.gd` ne charge aucun autoload).
+Les données qui viennent de `Leaderboard` (autoload) sont donc précalculées
+par `ui/track_select.gd` (`_meilleurs_temps_par_uid()`/
+`_derniers_joues_par_uid()`, uid → valeur, absent = jamais joué) et passées
+en paramètre, jamais lues directement dans `TrackGrouping`. Chaque fonction
+renvoie `Array[{"label": String, "entries": Array[Dictionary]}]`, sections
+déjà triées et ordonnées, une section vide n'est jamais incluse.
+
+- **Par créateur / Par titre** — même fonction (`sections_alpha()`,
+  `champ` = "auteur" ou "nom") : A → Z, puis « 0-9 », puis « Autre »,
+  pistes triées alphabétiquement (`String.naturalnocasecmp_to()`) dans
+  chaque section. Premier caractère normalisé pour quelques accents
+  français courants (table de repli, pas un normalisateur Unicode complet) ;
+  chiffre → « 0-9 » ; vide ou symbole → « Autre ».
+- **Par date d'ajout** — nécessite un nouveau champ, `TrackData.date_ajout`
+  (chaîne ISO, généré une seule fois à la première sauvegarde par
+  `ensure_date_ajout()`, même patron qu'`ensure_uid()`, appelé juste à côté
+  dans `editor/track_editor.gd`). Les pistes sauvegardées avant l'ajout de
+  ce champ sont migrées en mémoire dans `TrackData.load_from_path()` en
+  repli sur la date de modification du fichier (`FileAccess.
+  get_modified_time()`) — même principe que la migration d'`uid` juste au-
+  dessus, jamais une case « Date inconnue » par défaut pour les pistes déjà
+  existantes. Sections par jour calendaire, la plus récente en premier,
+  « Date inconnue » en dernier si la migration elle-même échoue.
+- **Par durée** — aucune donnée dédiée : approximée par le meilleur temps
+  personnel du joueur sur la piste, tous véhicules confondus (`Leaderboard.
+  runs(uid)`, déjà trié par temps croissant, premier élément). Tranches
+  fixes (< 30 s, 30 s–1 min, 1–2 min, 2–5 min, > 5 min), la plus courte en
+  premier, « Durée inconnue » en dernier pour une piste jamais jouée PAR CE
+  JOUEUR (donnée strictement locale, pas un temps de référence objectif).
+- **Par véhicule** — aucune piste n'a de restriction de véhicule aujourd'hui
+  (le système de conversion mono-véhicule mentionné dans « Le projet »
+  n'est pas construit) : une seule section « Tous les véhicules » contenant
+  tout, triée alphabétiquement — prête à se décliner en sections par
+  véhicule le jour où des pistes mono-véhicule existeront, sans changer la
+  fonction appelante.
+- **Mes pistes** — filtre `filtered` sur `not builtin`, liste plate (pas de
+  sections). Comme il n'existe aucun système de téléchargement/partage de
+  pistes, TOUTE piste locale non intégrée est nécessairement créée par le
+  joueur lui-même sur cette machine — ce mode est donc aujourd'hui
+  strictement équivalent à « Toutes les pistes » moins la piste intégrée,
+  en attendant qu'un vrai système de partage existe.
+- **Pistes récemment jouées** — sections par récence du dernier run (tous
+  véhicules), la plus récente en premier : Aujourd'hui (< 1 j), Cette
+  semaine (< 7 j), Ce mois-ci (< 30 j), Il y a plus d'un mois, « Jamais
+  jouée » en dernier (pas une valeur de récence, n'a pas sa place ailleurs
+  que tout en bas).
+
+Présélection de piste généralisée : l'ancienne condition (`_group_mode ==
+0`) devient `_group_mode != GroupMode.COLLECTIONS or _expanded_collection
+!= ""` — tous les nouveaux modes affichent tout immédiatement comme
+« Toutes les pistes », seul l'accordéon des collections a un état replié à
+gérer.
+
+Testé : `tools/run_tests.gd` passe (269 tests — 29 nouveaux sur
+`TrackGrouping`, bornes exactes de chaque classification testées
+directement sur les fonctions privées par convention (`_alpha_label()`,
+`_duree_label()`, `_recence_label()`), pas seulement via les fonctions
+publiques —, hash de régression inchangé : ce lot ne touche rien dans
+`sim/`). Comme documenté juste au-dessus pour le menu de véhicule, cette
+suite de tests ne peut PAS voir une erreur dans `ui/track_select.gd`
+(dispatch du menu, rendu des sections) — vérifié en jeu, tous les modes
+testés manuellement par l'utilisateur sans erreur en console.
 
 ---
 
@@ -1320,6 +1403,51 @@ l'UI, rien dans `sim/`) ; les deux bugs de ce lot n'étaient visibles qu'en
 jeu (même limite de la suite de tests que documentée juste au-dessus),
 chacun corrigé après reproduction manuelle par l'utilisateur puis
 validation par relance du jeu.
+
+**Regrouper par : douze modes de tri (`map/track_grouping.gd`,
+`map/track_data.gd`, `map/track_catalog.gd`, `editor/track_editor.gd`,
+`ui/track_select.gd`).** Sur demande explicite, façon osu! : le menu
+« Regrouper par : » passe de 2 à 12 entrées (créateur, titre, date
+d'ajout, durée, véhicule, mes pistes, récemment jouées — trois placeholders
+désactivés pour ce qui demande le backend ou une mécanique déjà reportée).
+Détail complet (logique de section, nouveau champ `TrackData.date_ajout`
++ migration, contrainte de pureté testable) dans « Regrouper par : douze
+modes de tri » plus haut dans Architecture. Décisions prises avec
+l'utilisateur avant ce lot (AskUserQuestion) pour chaque critère sans
+donnée existante — voir cette section pour le détail de chacune. Testé :
+`tools/run_tests.gd` passe (269 tests — 29 nouveaux sur `TrackGrouping`,
+bornes exactes de chaque tranche/classification —, hash de régression
+inchangé : ce lot ne touche rien dans `sim/`) ; tous les modes du menu
+testés manuellement en jeu par l'utilisateur, aucune erreur en console.
+
+**Deux bugs de marche arrière corrigés (`sim/car_sim.gd`,
+`sim/car_configs/car_config_formula.gd`).** Retour utilisateur après test
+manuel en jeu : (1) en marche arrière, le volant tournait la voiture du
+côté OPPOSÉ à la touche pressée pour Roadster/Ironside/Wasp/Halcyon — la
+formule du lacet (étape 4) utilise `v`, une MAGNITUDE (`FixedMath.
+length_2d`, jamais négative), donc le nez tourne toujours dans le même sens
+pour une même touche, avant ou en arrière ; mais la trajectoire suit
+`forward_speed` (signé, étape 8), qui s'inverse en marche arrière — la
+voiture visible à l'écran tournait donc du côté opposé à la touche. Corrigé
+par un multiplicateur de signe (`sens_deplacement`, dérivé de la vitesse
+projetée sur le nez au repère du tick précédent) appliqué UNIQUEMENT à
+l'étape 4, jamais à la magnitude de `v` utilisée ailleurs (ARC, seuils
+d'écrêtage) — un `Fixed.sign()` qui vaut +1 dès qu'il y a la moindre
+composante avant rend ce correctif un no-op bit-exact pour toute conduite
+qui ne recule jamais, y compris en glisse. (2) Needle (id `formula`) ne
+pouvait pas du tout reculer : `freinage_ms2` et `decel_naturelle_ms2`
+valaient tous les deux 8.0, seul véhicule avec cette égalité — la poussée
+du frein et la résistance naturelle s'annulaient pile à zéro CHAQUE tick
+sous frein seul, sans jamais accumuler d'un tick à l'autre (les 4 autres
+véhicules ont tous un écart net entre ces deux valeurs). `freinage_ms2`
+relevé à 10.0 (`decel_naturelle_ms2` inchangé) — reste sous Superbike
+(12.0), cohérent avec le profil plus léger de Needle, ajustable à la
+manette si besoin. Les deux bugs trouvés et confirmés via script headless
+jetable AVANT correction (jamais supposés) — voir `_build_test_world()`/
+`World.setup()`/`world.tick()` pour le patron de script minimal réutilisé.
+Testé : `tools/run_tests.gd` passe (269 tests, **hash de régression
+inchangé** — preuve directe que le correctif de signe est un no-op sur
+toute la suite de tests existante, qui ne recule jamais).
 
 Ordre de travail retenu :
 

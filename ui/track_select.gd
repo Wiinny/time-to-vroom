@@ -25,8 +25,18 @@ var _track_list: VBoxContainer
 var _track_button_group: ButtonGroup
 var _track_row_by_uid: Dictionary = {}  # uid -> Button
 var _group_option: OptionButton
-var _group_mode: int = 0  # 0 = toutes les pistes, 1 = regroupées par collection
 var _expanded_collection: String = ""  # nom de la collection dépliée, "" = aucune
+
+# Ordre = ordre des entrées dans _group_option (voir _build_top_bar()).
+# DATE_CREATION/DIFFICULTE/NOTE : placeholders désactivés, demandent le
+# site/backend ou une mécanique volontairement pas encore construite (voir
+# CLAUDE.md, sections correspondantes) — jamais atteints par _on_group_changed()
+# puisque Godot ne laisse pas sélectionner une entrée désactivée.
+enum GroupMode {
+	TOUTES, COLLECTIONS, CREATEUR, DATE_AJOUT, DATE_CREATION, DIFFICULTE,
+	DUREE, VEHICULE, NOTE, TITRE, MES_PISTES, RECEMMENT_JOUEES,
+}
+var _group_mode: int = GroupMode.TOUTES
 
 var _vehicle_menu: VehicleMenu
 var _collections_menu: CollectionsMenu
@@ -44,6 +54,15 @@ func _ready() -> void:
 	_refresh_catalog()
 	if not _selected.is_empty() and _track_row_by_uid.has(_selected["uid"]):
 		(_track_row_by_uid[_selected["uid"]] as Button).grab_focus()
+	_diag_print_sizes()  # TEMPORAIRE : re-vérification, à retirer
+
+func _diag_print_sizes() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	print("[TSDIAG] viewport=", get_viewport_rect())
+	print("[TSDIAG] _root_layout size=", _root_layout.size)
+	print("[TSDIAG] _group_option size=", _group_option.size)
+	print("[TSDIAG] _play_button pos=", _play_button.global_position, " size=", _play_button.size)
 
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -134,8 +153,34 @@ func _build_top_bar(parent: VBoxContainer) -> void:
 	bar.add_child(group_label)
 
 	_group_option = OptionButton.new()
+	# fit_to_longest_item (vrai par défaut) fixe la taille MINIMALE du bouton
+	# fermé sur son item le plus large, même désactivé/jamais sélectionnable
+	# — ex. "Par date de création (bientôt disponible)" élargissait toute la
+	# barre du haut au-delà de l'écran, et avec elle _root_layout
+	# (VBoxContainer, largeur = max de ses enfants), poussant JOUER hors
+	# champ tout en bas (piège trouvé par diagnostic : clip_text, tenté
+	# d'abord, n'a AUCUN effet sur cette taille minimale — vérifié, ce n'est
+	# pas ce qu'il fallait couper). custom_minimum_size fixe une largeur
+	# raisonnable une fois fit_to_longest_item désactivé ; clip_text reste en
+	# plus par prudence si un futur item non désactivé s'avérait trop long.
+	_group_option.fit_to_longest_item = false
+	_group_option.clip_text = true
+	_group_option.custom_minimum_size = Vector2(200.0, 0.0)
 	_group_option.add_item("Toutes les pistes")
 	_group_option.add_item("Collections")
+	_group_option.add_item("Par créateur")
+	_group_option.add_item("Par date d'ajout")
+	_group_option.add_item("Par date de création (bientôt disponible)")
+	_group_option.set_item_disabled(GroupMode.DATE_CREATION, true)
+	_group_option.add_item("Par difficulté (bientôt disponible)")
+	_group_option.set_item_disabled(GroupMode.DIFFICULTE, true)
+	_group_option.add_item("Par durée")
+	_group_option.add_item("Par véhicule")
+	_group_option.add_item("Par note reçue (bientôt disponible)")
+	_group_option.set_item_disabled(GroupMode.NOTE, true)
+	_group_option.add_item("Par titre")
+	_group_option.add_item("Mes pistes")
+	_group_option.add_item("Pistes récemment jouées")
 	_group_option.item_selected.connect(_on_group_changed)
 	bar.add_child(_group_option)
 
@@ -364,23 +409,96 @@ func _refresh_catalog(filter: String = "") -> void:
 		if needle == "" or nom.contains(needle) or auteur.contains(needle):
 			filtered.append(entry)
 
-	var any_rows: bool = _build_grouped_list(filtered) if _group_mode == 1 else _build_flat_list(filtered)
+	var any_rows: bool = _build_catalog_rows(filtered)
 	if not any_rows:
 		var empty := Label.new()
-		empty.text = "Aucune collection — clic droit sur une piste pour en créer une" if _group_mode == 1 else "Aucune piste ne correspond à la recherche"
+		empty.text = "Aucune collection — clic droit sur une piste pour en créer une" if _group_mode == GroupMode.COLLECTIONS else "Aucune piste ne correspond à la recherche"
 		empty.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 		_track_list.add_child(empty)
 
 	var target: Dictionary = {}
-	if _group_mode == 0 or _expanded_collection != "":
+	# Seul l'accordéon des collections a un état replié à gérer : tous les
+	# autres modes (flat ou sectionné) affichent tout immédiatement, comme
+	# "Toutes les pistes".
+	if _group_mode != GroupMode.COLLECTIONS or _expanded_collection != "":
 		target = _selected
 		if target.is_empty() or not _track_row_by_uid.has(target.get("uid", "")):
 			target = filtered[0] if not filtered.is_empty() else {}
-			# En mode regroupé, ne présélectionner que si la piste appartient
-			# bien à la ligne visible (dans la collection dépliée).
-			if _group_mode == 1 and not _track_row_by_uid.has(target.get("uid", "")):
+			# En mode regroupé (collections), ne présélectionner que si la
+			# piste appartient bien à la ligne visible (dans la collection
+			# dépliée).
+			if _group_mode == GroupMode.COLLECTIONS and not _track_row_by_uid.has(target.get("uid", "")):
 				target = {}
 	_select_track(target)
+
+# Dispatche vers le bon renderer selon _group_mode. Les modes basés sur
+# Leaderboard (DUREE, RECEMMENT_JOUEES) précalculent leurs données ici :
+# TrackGrouping est statique/pur, sans dépendance à l'autoload Leaderboard
+# (même contrainte de testabilité que replay/ghost_resolver.gd).
+func _build_catalog_rows(filtered: Array[Dictionary]) -> bool:
+	match _group_mode:
+		GroupMode.COLLECTIONS:
+			return _build_grouped_list(filtered)
+		GroupMode.CREATEUR:
+			return _build_sectioned_list(TrackGrouping.sections_alpha(filtered, "auteur"))
+		GroupMode.TITRE:
+			return _build_sectioned_list(TrackGrouping.sections_alpha(filtered, "nom"))
+		GroupMode.DATE_AJOUT:
+			return _build_sectioned_list(TrackGrouping.sections_date_ajout(filtered))
+		GroupMode.DUREE:
+			return _build_sectioned_list(TrackGrouping.sections_duree(filtered, _meilleurs_temps_par_uid(filtered)))
+		GroupMode.RECEMMENT_JOUEES:
+			return _build_sectioned_list(TrackGrouping.sections_recemment_jouees(filtered, _derniers_joues_par_uid(filtered)))
+		GroupMode.VEHICULE:
+			return _build_sectioned_list(TrackGrouping.sections_vehicule(filtered))
+		GroupMode.MES_PISTES:
+			return _build_flat_list(filtered.filter(func(e: Dictionary) -> bool: return not bool(e.get("builtin", false))))
+		_:
+			return _build_flat_list(filtered)  # TOUTES, et repli pour un mode inattendu
+
+# uid -> meilleur temps perso en ms, tous véhicules confondus (Leaderboard.
+# runs() est déjà trié par temps croissant). Absent du dictionnaire = jamais
+# joué — TrackGrouping.sections_duree() traite cette absence comme telle.
+func _meilleurs_temps_par_uid(filtered: Array[Dictionary]) -> Dictionary:
+	var result: Dictionary = {}
+	for entry in filtered:
+		var runs: Array[Dictionary] = Leaderboard.runs(entry["uid"])
+		if not runs.is_empty():
+			result[entry["uid"]] = int(runs[0]["ms"])
+	return result
+
+# uid -> unix du run le plus récent, tous véhicules confondus. Absent du
+# dictionnaire = jamais joué.
+func _derniers_joues_par_uid(filtered: Array[Dictionary]) -> Dictionary:
+	var result: Dictionary = {}
+	for entry in filtered:
+		var dernier: float = -1.0
+		for run in Leaderboard.runs(entry["uid"]):
+			var t: float = Time.get_unix_time_from_datetime_string(String(run.get("date", "")))
+			if t > dernier:
+				dernier = t
+		if dernier >= 0.0:
+			result[entry["uid"]] = dernier
+	return result
+
+# Sections toujours dépliées (PAS l'accordéon des collections) : un Label
+# d'entête non interactif par section, suivi de ses lignes — même
+# _build_track_row() que partout ailleurs sur cet écran.
+func _build_sectioned_list(sections: Array[Dictionary]) -> bool:
+	for section in sections:
+		_track_list.add_child(_build_section_header(String(section["label"])))
+		for entry in section["entries"]:
+			var button: Button = _build_track_row(entry)
+			_track_list.add_child(button)
+			_track_row_by_uid[entry["uid"]] = button
+	return not sections.is_empty()
+
+func _build_section_header(label: String) -> Label:
+	var header := Label.new()
+	header.text = label
+	header.add_theme_font_size_override("font_size", 16)
+	header.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+	return header
 
 func _build_flat_list(filtered: Array[Dictionary]) -> bool:
 	for entry in filtered:

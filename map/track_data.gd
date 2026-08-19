@@ -22,6 +22,11 @@ extends Resource
 @export var nom: String = ""
 @export var auteur: String = ""
 
+# Date d'ajout LOCALE (première sauvegarde sur cette machine, pas une date de
+# mise en ligne — il n'y a pas de site/backend, voir CLAUDE.md). Sert au
+# regroupement « Par date d'ajout » de ui/track_select.gd.
+@export var date_ajout: String = ""
+
 @export var point_x: PackedInt64Array = PackedInt64Array()
 @export var point_y: PackedInt64Array = PackedInt64Array()
 @export var point_z: PackedInt64Array = PackedInt64Array()
@@ -118,6 +123,13 @@ func ensure_uid() -> void:
 	h = FixedHash.combine(h, int(Time.get_unix_time_from_system() * 1000.0))
 	uid = "piste_%d" % (h & 0x7fffffffffffffff)
 
+# Même patron qu'ensure_uid() : générée une seule fois, à la première
+# sauvegarde, jamais recalculée ensuite.
+func ensure_date_ajout() -> void:
+	if date_ajout != "":
+		return
+	date_ajout = Time.get_datetime_string_from_system()
+
 # Charge une piste et migre les .tres antérieurs au format_version 2 (pas
 # d'uid) : uid retombe sur le nom de fichier pour préserver les records déjà
 # enregistrés sous cet identifiant (voir CLAUDE.md, section « Éditeur de
@@ -134,4 +146,12 @@ static func load_from_path(path: String) -> TrackData:
 		data.uid = base
 		if data.nom == "":
 			data.nom = base
+	# Migration en mémoire seulement (persistée à la prochaine sauvegarde,
+	# même principe que la migration d'uid ci-dessus) : une piste sauvegardée
+	# avant l'ajout de ce champ retombe sur la date de modification du
+	# fichier plutôt qu'une case « Date inconnue » pour toujours.
+	if data.date_ajout == "":
+		var mtime: int = FileAccess.get_modified_time(path)
+		if mtime > 0:
+			data.date_ajout = Time.get_datetime_string_from_unix_time(mtime)
 	return data

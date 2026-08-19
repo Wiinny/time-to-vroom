@@ -7,12 +7,12 @@ class_name TrackCatalog
 
 const BUILTIN_UID: String = "hardcoded_v1"
 
-# -> [{ "uid", "nom", "auteur", "path", "builtin": bool }, ...]
+# -> [{ "uid", "nom", "auteur", "path", "builtin": bool, "date_ajout" }, ...]
 # "path" est vide pour la piste intégrée (main.gd retombe sur
 # TrackHardcoded quand Session.pending_track_path est vide).
 static func list_tracks() -> Array[Dictionary]:
 	var result: Array[Dictionary] = [
-		{"uid": BUILTIN_UID, "nom": "Circuit d'essai", "auteur": "Intégrée", "path": "", "builtin": true},
+		{"uid": BUILTIN_UID, "nom": "Track Test 1", "auteur": "shmelebelek", "path": "", "builtin": true, "date_ajout": ""},
 	]
 
 	DirAccess.make_dir_recursive_absolute("user://tracks")
@@ -33,6 +33,7 @@ static func list_tracks() -> Array[Dictionary]:
 					"auteur": data.auteur,
 					"path": path,
 					"builtin": false,
+					"date_ajout": data.date_ajout,
 				})
 		file_name = dir.get_next()
 	dir.list_dir_end()

@@ -1211,6 +1211,136 @@ func _test_ghost_resolver() -> void:
 	ReplayStore.delete_file(file_formula)
 	ReplayStore.delete_file(file_record)
 
+# --- Regroupement des pistes (map/track_grouping.gd) ---
+# Statique et pur, comme GhostResolver : testable ici sans autoload.
+
+func _test_track_grouping_alpha() -> void:
+	var entries: Array[Dictionary] = [
+		{"uid": "1", "nom": "Zebra"},
+		{"uid": "2", "nom": "apple"},
+		{"uid": "3", "nom": "3-way"},
+		{"uid": "4", "nom": "Éclair"},
+		{"uid": "5", "nom": "#hashtag"},
+		{"uid": "6", "nom": ""},
+		{"uid": "7", "nom": "amber"},
+	]
+	var sections: Array[Dictionary] = TrackGrouping.sections_alpha(entries, "nom")
+	_check("grouping alpha: 5 sections non vides (A, E, Z, 0-9, Autre)", sections.size() == 5)
+	if sections.size() == 5:
+		_check("grouping alpha: ordre A, E, Z, 0-9, Autre",
+			sections[0]["label"] == "A" and sections[1]["label"] == "E" and sections[2]["label"] == "Z"
+			and sections[3]["label"] == "0-9" and sections[4]["label"] == "Autre")
+		var section_a: Array = sections[0]["entries"]
+		_check("grouping alpha: section A triée (amber avant apple)",
+			section_a.size() == 2 and section_a[0]["nom"] == "amber" and section_a[1]["nom"] == "apple")
+		_check("grouping alpha: accent normalisé (Éclair -> E)", sections[1]["entries"][0]["nom"] == "Éclair")
+		_check("grouping alpha: chiffre -> 0-9", sections[3]["entries"][0]["nom"] == "3-way")
+		var section_autre: Array = sections[4]["entries"]
+		var uids_autre: Array = section_autre.map(func(e: Dictionary) -> String: return String(e["uid"]))
+		_check("grouping alpha: vide et symbole -> Autre", uids_autre.has("5") and uids_autre.has("6"))
+
+	# Bornes de _alpha_label() directement, sans dépendre de sections_alpha().
+	_check("grouping alpha: borne chiffre '9'", TrackGrouping._alpha_label("9eme ciel") == "0-9")
+	_check("grouping alpha: borne lettre 'A'", TrackGrouping._alpha_label("A") == "A")
+	_check("grouping alpha: borne lettre 'Z'", TrackGrouping._alpha_label("z") == "Z")
+	_check("grouping alpha: espaces seuls -> Autre", TrackGrouping._alpha_label("   ") == "Autre")
+
+func _test_track_grouping_date_ajout() -> void:
+	var jour1: int = 1700000000  # référence fixe, jour arbitraire
+	var jour2: int = jour1 + 2 * 86400
+	var str_jour1: String = Time.get_datetime_string_from_unix_time(jour1)
+	var str_jour1_plus_tard: String = Time.get_datetime_string_from_unix_time(jour1 + 3600)
+	var str_jour2: String = Time.get_datetime_string_from_unix_time(jour2)
+
+	var entries: Array[Dictionary] = [
+		{"uid": "a", "date_ajout": str_jour2},
+		{"uid": "b", "date_ajout": str_jour1},
+		{"uid": "c", "date_ajout": str_jour1_plus_tard},
+		{"uid": "d", "date_ajout": ""},
+	]
+	var sections: Array[Dictionary] = TrackGrouping.sections_date_ajout(entries)
+	_check("grouping date_ajout: 3 sections (jour2, jour1, Date inconnue)", sections.size() == 3)
+	if sections.size() == 3:
+		_check("grouping date_ajout: jour le plus récent en premier", sections[0]["entries"][0]["uid"] == "a")
+		var section_jour1: Array = sections[1]["entries"]
+		_check("grouping date_ajout: même jour regroupé, plus tardif en premier",
+			section_jour1.size() == 2 and section_jour1[0]["uid"] == "c" and section_jour1[1]["uid"] == "b")
+		_check("grouping date_ajout: Date inconnue en dernier",
+			sections[2]["label"] == "Date inconnue" and sections[2]["entries"][0]["uid"] == "d")
+
+func _test_track_grouping_duree() -> void:
+	var meilleurs_temps: Dictionary = {
+		"a": 10000, "b": 29999, "c": 30000, "d": 59999, "e": 60000,
+		"f": 119999, "g": 120000, "h": 299999, "i": 300000, "j": 500000,
+	}
+	var entries: Array[Dictionary] = []
+	for uid in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]:
+		entries.append({"uid": uid})  # "k" absent de meilleurs_temps -> jamais joué
+
+	var sections: Array[Dictionary] = TrackGrouping.sections_duree(entries, meilleurs_temps)
+	var attendu: Array[Array] = [
+		["a", "b"], ["c", "d"], ["e", "f"], ["g", "h"], ["i", "j"], ["k"],
+	]
+	_check("grouping durée: 6 tranches non vides", sections.size() == attendu.size())
+	if sections.size() == attendu.size():
+		var ok: bool = true
+		for i in range(attendu.size()):
+			var uids: Array = (sections[i]["entries"] as Array).map(func(e: Dictionary) -> String: return String(e["uid"]))
+			if uids != attendu[i]:
+				ok = false
+		_check("grouping durée: tranches croissantes, ordre ascendant dans chacune, inconnue en dernier", ok)
+
+	# Bornes exactes de _duree_label().
+	_check("grouping durée: borne 29999ms", TrackGrouping._duree_label(29999) == "Moins de 30 secondes")
+	_check("grouping durée: borne 30000ms", TrackGrouping._duree_label(30000) == "30 secondes à 1 minute")
+	_check("grouping durée: borne 300000ms", TrackGrouping._duree_label(300000) == "Plus de 5 minutes")
+	_check("grouping durée: jamais joué (-1)", TrackGrouping._duree_label(-1) == "Durée inconnue")
+
+func _test_track_grouping_recemment_jouees() -> void:
+	var now: float = Time.get_unix_time_from_system()
+	var derniers_joues: Dictionary = {
+		"a": now - 3600.0,           # il y a 1h -> Aujourd'hui
+		"b": now - 3.0 * 86400.0,    # il y a 3j -> Cette semaine
+		"c": now - 15.0 * 86400.0,   # il y a 15j -> Ce mois-ci
+		"d": now - 40.0 * 86400.0,   # il y a 40j -> plus d'un mois
+	}
+	var entries: Array[Dictionary] = [
+		{"uid": "a"}, {"uid": "b"}, {"uid": "c"}, {"uid": "d"}, {"uid": "e"},  # "e" jamais joué
+	]
+	var sections: Array[Dictionary] = TrackGrouping.sections_recemment_jouees(entries, derniers_joues)
+	var attendu: Array[String] = ["a", "b", "c", "d", "e"]
+	_check("grouping récence: 5 sections, la plus récente en premier, jamais en dernier",
+		sections.size() == 5)
+	if sections.size() == 5:
+		var ok: bool = true
+		for i in range(5):
+			if (sections[i]["entries"] as Array)[0]["uid"] != attendu[i]:
+				ok = false
+		_check("grouping récence: une piste par section dans le bon ordre", ok)
+
+	# Bornes exactes de _recence_label() (intervalles ouverts à droite : la
+	# borne elle-même appartient à la tranche SUIVANTE, pas celle testée).
+	_check("grouping récence: borne 1 jour pile -> Cette semaine, pas Aujourd'hui",
+		TrackGrouping._recence_label(now - 86400.0, now) == "Cette semaine")
+	_check("grouping récence: borne 7 jours pile -> Ce mois-ci",
+		TrackGrouping._recence_label(now - 7.0 * 86400.0, now) == "Ce mois-ci")
+	_check("grouping récence: borne 30 jours pile -> plus d'un mois",
+		TrackGrouping._recence_label(now - 30.0 * 86400.0, now) == "Il y a plus d'un mois")
+	_check("grouping récence: jamais joué (-1)", TrackGrouping._recence_label(-1.0, now) == "Jamais jouée")
+
+func _test_track_grouping_vehicule() -> void:
+	var entries: Array[Dictionary] = [
+		{"uid": "1", "nom": "Zebra Track"},
+		{"uid": "2", "nom": "Alpha Track"},
+	]
+	var sections: Array[Dictionary] = TrackGrouping.sections_vehicule(entries)
+	_check("grouping véhicule: une seule section 'Tous les véhicules'",
+		sections.size() == 1 and sections[0]["label"] == "Tous les véhicules")
+	if sections.size() == 1:
+		var noms: Array = (sections[0]["entries"] as Array).map(func(e: Dictionary) -> String: return String(e["nom"]))
+		_check("grouping véhicule: tri alphabétique", noms == ["Alpha Track", "Zebra Track"])
+	_check("grouping véhicule: liste vide -> aucune section", TrackGrouping.sections_vehicule([]).is_empty())
+
 func _test_configs_chargeables() -> void:
 	var ids: PackedStringArray = ["gt", "formula", "superbike", "street_bike", "hover", "id_inconnu"]
 	for id in ids:
@@ -1253,6 +1383,11 @@ func _initialize() -> void:
 	_test_replay_serialisation()
 	_test_deux_mondes_isoles()
 	_test_ghost_resolver()
+	_test_track_grouping_alpha()
+	_test_track_grouping_date_ajout()
+	_test_track_grouping_duree()
+	_test_track_grouping_recemment_jouees()
+	_test_track_grouping_vehicule()
 	_test_bake_unites()
 	_test_configs_chargeables()
 	_test_horloge()

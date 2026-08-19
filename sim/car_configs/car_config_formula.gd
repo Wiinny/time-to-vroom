@@ -13,7 +13,19 @@ func _init() -> void:
 	palier_accel_kmh = 185.0  # courbe linéaire : accel_basse == accel_haute, pas de vrai palier
 	accel_basse_ms2 = 7.5
 	accel_haute_ms2 = 7.5
-	freinage_ms2 = 8.0
+	# freinage_ms2 STRICTEMENT supérieur à decel_naturelle_ms2 : la poussée du
+	# frein (étape 8 de sim/car_sim.gd) et la résistance naturelle qui
+	# s'applique dans le MÊME tick (decel_naturelle, freinage relâché) sont
+	# tous les deux appliqués sans jamais accumuler d'un tick à l'autre si
+	# leurs magnitudes sont égales — les deux poussées s'annulent pile à zéro
+	# à chaque tick. Avec 8.0/8.0 (bug réel rencontré, confirmé par script
+	# jetable), Needle restait figé à vitesse exactement nulle sous frein
+	# seul, incapable de passer en marche arrière — les 4 autres véhicules
+	# ont tous un écart net entre ces deux valeurs (ex. Roadster 18/12) et
+	# n'ont jamais ce problème. 10.0 garde Needle sous Superbike (12.0),
+	# cohérent avec ses valeurs plus légères que les autres véhicules à
+	# moteur ; ajustable à la manette si le retour au freinage ne convient pas.
+	freinage_ms2 = 10.0
 	decel_naturelle_ms2 = 8.0
 
 	angle_braquage_max_deg = 30.0

@@ -117,6 +117,25 @@ static func tick(state: CarState, input: InputFrame, track: Track, config: CarCo
 	var v: int = FixedMath.length_2d(state.vit_x, state.vit_z)
 	var cout_saut_a_appliquer: int = 0
 
+	# Sens de déplacement réel le long du nez (repère du tick précédent, pas
+	# encore mis à jour cette frame — même latence d'un tick qu'ailleurs dans
+	# cette fonction, ex. _appliquer_elements()). Sert UNIQUEMENT à l'étape 4
+	# (yaw) ci-dessous : v ci-dessus est une MAGNITUDE (jamais négative), donc
+	# sans ce signe le nez tournait toujours du même côté pour une même
+	# touche, avant ou en marche arrière — mais la TRAJECTOIRE suit
+	# forward_speed (signé, étape 8), donc en marche arrière la voiture
+	# tournait visiblement du côté OPPOSÉ à la touche pressée (bug réel
+	# rencontré et confirmé par script jetable avant correction : "D" en
+	# marche arrière déplaçait pos_x du côté négatif au lieu du côté positif
+	# observé en avant). N'affecte QUE le signe, jamais la magnitude de v — un
+	# Fixed.sign() vaut +1 dès qu'il y a la moindre composante avant, donc ce
+	# correctif est un no-op bit-exact pour toute conduite qui ne recule
+	# jamais (y compris en glisse, où le signe reste +1 tant que
+	# forward_speed > 0 malgré une vitesse latérale importante).
+	var sens_deplacement: int = Fixed.sign(Fixed.mul(state.vit_x, FixedMath.sin(state.yaw)) + Fixed.mul(state.vit_z, FixedMath.cos(state.yaw)))
+	if sens_deplacement == 0:
+		sens_deplacement = 1  # à l'arrêt : v (magnitude) est déjà 0 plus bas, ce repli n'a aucun effet observable
+
 	# --- 1. Transitions de glisse ---
 	var front_derapage: bool = input.derapage > 0 and not state.derapage_precedent
 	if config.type_glisse == CarConfig.TypeGlisse.SAUT_ARC:
@@ -183,7 +202,7 @@ static func tick(state: CarState, input: InputFrame, track: Track, config: CarCo
 		# de trop et le yaw ne tourne quasiment jamais (bug réel rencontré :
 		# la voiture restait plaquée contre le premier mur, yaw figé à 0,
 		# malgré un angle de roues proche du maximum).
-		dpsi = Fixed.mul(v, ReglesCommunes.inv_empattement) * angle_effectif
+		dpsi = Fixed.mul(v, ReglesCommunes.inv_empattement) * angle_effectif * sens_deplacement
 		budget = config.adherence
 		# Budget à DEUX niveaux pour PIVOT_AVANT (voir ReglesCommunes.
 		# coef_glisse_passif) : glisse activement engagée -> coef_glisse
