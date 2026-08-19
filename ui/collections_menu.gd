@@ -1,8 +1,22 @@
 # Panneau de gestion des collections (façon osu!), ouvert depuis le menu
 # contextuel clic droit d'une piste dans ui/track_select.gd — même patron
-# d'overlay que ui/vehicle_menu.gd / ui/editor_menu.gd. Les boutons
+# d'overlay que ui/vehicle_menu.gd / ui/ghost_menu.gd. Les boutons
 # Ajouter/Retirer de chaque ligne agissent sur LA piste qui a ouvert ce
 # panneau (voir open_for()), comme le clic droit -> Collections d'osu!.
+#
+# Centrage et bouton "Retour" (bas-gauche, remplace l'ancien "Fermer") : même
+# méthode déjà vérifiée sur ui/ghost_menu.gd et ui/vehicle_menu.gd, PAS une
+# nouvelle tentative — voir le piège PRESET_FULL_RECT documenté en tête de
+# CLAUDE.md. Ce nœud est créé une fois puis .hide()é par ui/track_select.gd
+# AVANT que son parent (ce dernier) n'ait sa taille finale : la taille
+# calculée depuis les ancrages restait bloquée à (0,0) indéfiniment, et
+# CenterContainer "centrait" alors dans un rectangle de taille nulle. Fixé en
+# forçant size/position directement sur get_viewport_rect() dans
+# focus_first() (appelée juste après .show(), quand le parent est
+# DÉFINITIVEMENT bien dimensionné) plutôt que de dépendre du système
+# d'ancrage pour ce nœud précis — même chose pour _back_button, ancré
+# bas-gauche RELATIVEMENT à cette taille corrigée, donc positionné ici aussi,
+# jamais dans _build_ui() (trop tôt).
 class_name CollectionsMenu
 extends Control
 
@@ -11,6 +25,7 @@ signal closed
 var _track: Dictionary = {}
 var _create_edit: LineEdit
 var _rows_container: VBoxContainer
+var _back_button: Button
 var _rename_target: String = ""  # nom en cours de renommage, "" = aucun
 
 func _ready() -> void:
@@ -24,6 +39,9 @@ func open_for(track: Dictionary) -> void:
 	_rename_target = ""
 
 func focus_first() -> void:
+	position = Vector2.ZERO
+	size = get_viewport_rect().size
+	_back_button.position = Vector2(0.0, size.y - _back_button.size.y)
 	_refresh()
 	_create_edit.grab_focus()
 
@@ -66,10 +84,24 @@ func _build_ui() -> void:
 	_rows_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_rows_container)
 
-	var back_button := Button.new()
-	back_button.text = "Fermer"
-	back_button.pressed.connect(func() -> void: closed.emit())
-	vbox.add_child(back_button)
+	# "Retour" HORS du panneau centré ci-dessus : bas-gauche de l'écran, même
+	# taille/emplacement que le bouton "Retour" de ui/track_select.gd (pas un
+	# élément du panneau qui grandirait avec lui). Ancrage posé dans
+	# focus_first(), voir son commentaire et celui en tête de fichier.
+	_back_button = Button.new()
+	_back_button.text = "Retour"
+	_back_button.pressed.connect(func() -> void: closed.emit())
+	add_child(_back_button)
+
+# Échap ferme ce panneau comme le bouton "Retour" — même convention que
+# partout ailleurs dans le jeu (voir ui/vehicle_menu.gd, ui/editor_menu.gd,
+# ui/settings_menu.gd, ui/ghost_menu.gd, ui/track_select.gd). Le garde
+# `visible` est nécessaire : ce nœud reste dans l'arbre (show()/hide()) même
+# quand ce panneau n'est pas affiché.
+func _unhandled_input(event: InputEvent) -> void:
+	if visible and event.is_action_pressed("ui_cancel"):
+		closed.emit()
+		get_viewport().set_input_as_handled()
 
 func _on_create_submitted(text: String) -> void:
 	if Collections.create(text):
@@ -81,7 +113,14 @@ func _on_create_submitted(text: String) -> void:
 	_create_edit.grab_focus()
 
 func _refresh() -> void:
+	# remove_child() AVANT queue_free(), pas juste queue_free() seul : ce
+	# dernier diffère la suppression réelle à la fin du frame — piège déjà
+	# rencontré sur ui/vehicle_menu.gd (voir CLAUDE.md), où une mesure de
+	# taille juste après un _refresh() comptait encore les anciennes lignes.
+	# Ici, la hauteur de _rows_container influence le centrage vertical du
+	# panneau (CenterContainer au-dessus) : même précaution par prudence.
 	for child in _rows_container.get_children():
+		_rows_container.remove_child(child)
 		child.queue_free()
 
 	var names: Array[String] = Collections.list_names()

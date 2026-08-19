@@ -130,6 +130,31 @@ suivant — mais un panneau positionné une fois manuellement (comme
 nouvel écran qui reconstruit une liste ET se positionne/dimensionne
 manuellement dans la même fonction.
 
+Piège rencontré, non résolu dans son mécanisme exact : un clic sur une zone
+« vide » de `ui/track_select.gd` (ni bouton, ni champ de texte) n'atteignait
+JAMAIS `_unhandled_input()`, vérifié par trace (aucune ligne imprimée, même
+après avoir mis `mouse_filter = IGNORE` sur le `ColorRect` de fond ET sur
+les `Control` nus utilisés comme spacers — ces derniers sont `STOP` par
+défaut, contrairement aux conteneurs `VBoxContainer`/`HBoxContainer`/
+`ScrollContainer`, qui sont `PASS` par défaut : vérifié par script jetable,
+`Control.mouse_filter par défaut = 0 (STOP)`, `VBoxContainer = 1 (PASS)`).
+Un troisième correctif dans ce sens n'a pas non plus suffi — quelque chose
+dans cette arborescence profondément imbriquée continue de consommer le
+clic avant `_unhandled_input()`, sans qu'on ait isolé précisément quoi.
+Contournement qui fonctionne, vérifié en jeu : `_input(event)` À LA PLACE
+de `_unhandled_input()` pour ce cas précis — `_input()` s'exécute AVANT tout
+le système de `Control` (dispatch GUI compris), donc voit CHAQUE clic sans
+dépendre de la chaîne `mouse_filter`, avec une vérification de position
+manuelle (`get_global_rect().has_point(...)`) plutôt que de compter sur le
+fait qu'aucun `Control` ne l'ait déjà réclamé. Piège séparé rencontré en
+essayant de VÉRIFIER ce bug avant de le corriger : `Window.push_input()` en
+`--headless`/`SceneTree` ne reproduit PAS fidèlement le test de collision
+d'un clic réel contre des `Control` (un même clic simulé atteignait
+`_unhandled_input()` avec et sans le correctif attendu) — ce type précis de
+bug (routage GUI d'un clic) n'est pas vérifiable de façon fiable en
+headless, contrairement aux tailles/positions/valeurs de propriétés
+(`get_minimum_size()`, `mouse_filter` par défaut, etc.), qui elles le sont.
+
 ---
 
 ## Règles non négociables
@@ -1448,6 +1473,38 @@ jetable AVANT correction (jamais supposés) — voir `_build_test_world()`/
 Testé : `tools/run_tests.gd` passe (269 tests, **hash de régression
 inchangé** — preuve directe que le correctif de signe est un no-op sur
 toute la suite de tests existante, qui ne recule jamais).
+
+**Champ de recherche (`ui/track_select.gd`) : cliquer en dehors ne libérait
+pas le focus.** Retour utilisateur : seul un clic sur un bouton en sortait,
+gênant. Trois correctifs successifs par `mouse_filter` (fond, deux spacers)
+n'ont pas suffi — le clic n'atteignait jamais `_unhandled_input()`, vérifié
+par trace, cause exacte non isolée dans cette arborescence imbriquée.
+Contourné avec `_input()` à la place (voir le piège détaillé en tête de ce
+fichier), qui voit le clic sans dépendre de la chaîne `mouse_filter`. Un
+détour de vérification a aussi révélé que `Window.push_input()` en
+`--headless` ne reproduit pas fidèlement le routage GUI réel d'un clic —
+deux « confirmations » en cours de route étaient donc des faux positifs,
+signalés à l'utilisateur plutôt que tus. Testé : `tools/run_tests.gd` passe
+(269 tests, hash de régression inchangé — ce lot ne touche que de l'UI) ;
+comportement final confirmé en jeu par l'utilisateur après plusieurs allers-
+retours.
+
+**`ui/collections_menu.gd` recentré, « Fermer » → « Retour ».** Sur demande
+explicite (« pas ton intuition, une méthode sûre ») : appliqué mot pour mot
+les techniques déjà vérifiées empiriquement sur `ui/ghost_menu.gd`/
+`ui/vehicle_menu.gd` cette session (voir le piège `PRESET_FULL_RECT` et le
+piège `remove_child()`/`queue_free()` en tête de ce fichier), pas de
+nouvelle tentative à l'aveugle — `size`/`position` forcés sur
+`get_viewport_rect()` dans `focus_first()`, bouton « Retour » repositionné
+au même endroit, `remove_child()` avant `queue_free()` dans `_refresh()`,
+Échap ajouté (ce panneau ne l'avait jamais eu, contrairement au reste du
+jeu). Vérifié par diagnostic chiffré temporaire (pas seulement visuel) avant
+de conclure : position du panneau strictement égale au centre calculé
+`(largeur_écran − largeur_panneau) / 2`, bouton « Retour » à `y +
+hauteur_bouton == hauteur_écran` (collé au bord). Testé :
+`tools/run_tests.gd` passe (269 tests, hash de régression inchangé) ;
+confirmé en jeu par l'utilisateur, cohérent avec les chiffres du
+diagnostic.
 
 Ordre de travail retenu :
 

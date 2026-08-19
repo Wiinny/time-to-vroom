@@ -54,15 +54,6 @@ func _ready() -> void:
 	_refresh_catalog()
 	if not _selected.is_empty() and _track_row_by_uid.has(_selected["uid"]):
 		(_track_row_by_uid[_selected["uid"]] as Button).grab_focus()
-	_diag_print_sizes()  # TEMPORAIRE : re-vérification, à retirer
-
-func _diag_print_sizes() -> void:
-	await get_tree().process_frame
-	await get_tree().process_frame
-	print("[TSDIAG] viewport=", get_viewport_rect())
-	print("[TSDIAG] _root_layout size=", _root_layout.size)
-	print("[TSDIAG] _group_option size=", _group_option.size)
-	print("[TSDIAG] _play_button pos=", _play_button.global_position, " size=", _play_button.size)
 
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -71,6 +62,13 @@ func _build_ui() -> void:
 	var bg := ColorRect.new()
 	bg.color = Color(0.05, 0.05, 0.08)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# IGNORE, pas le défaut STOP d'un ColorRect : les conteneurs (VBoxContainer/
+	# HBoxContainer) laissent bien passer les clics par défaut (PASS, vérifié),
+	# mais un clic sur une zone vide finissait par atterrir sur CE ColorRect de
+	# fond (couvre tout l'écran, juste derrière), qui l'avalait silencieusement
+	# avant qu'il n'atteigne _unhandled_input() — c'est ce qui empêchait le
+	# clic-en-dehors-du-champ de libérer le focus de _search_edit.
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
 	_root_layout = VBoxContainer.new()
@@ -137,6 +135,12 @@ func _build_top_bar(parent: VBoxContainer) -> void:
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# IGNORE, pas le défaut STOP d'un Control nu : ce spacer occupe une zone
+	# potentiellement large (EXPAND_FILL) et avalait silencieusement les clics
+	# qui y atterrissaient, avant même d'atteindre `bg` (voir son propre
+	# commentaire) ou _unhandled_input() — un deuxième endroit où le clic
+	# "en dehors du champ de recherche" pouvait mourir sans rien faire.
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(spacer)
 
 	var search_label := Label.new()
@@ -184,15 +188,6 @@ func _build_top_bar(parent: VBoxContainer) -> void:
 	_group_option.item_selected.connect(_on_group_changed)
 	bar.add_child(_group_option)
 
-	var sort_label := Label.new()
-	sort_label.text = "Trier par :"
-	bar.add_child(sort_label)
-
-	var sort_option := OptionButton.new()
-	sort_option.add_item("(bientôt disponible)")
-	sort_option.disabled = true
-	bar.add_child(sort_option)
-
 # ------------------------------------------------------------ colonne gauche --
 
 func _build_leaderboard_column(parent: HBoxContainer) -> void:
@@ -202,10 +197,25 @@ func _build_leaderboard_column(parent: HBoxContainer) -> void:
 	parent.add_child(col)
 
 	var mode := OptionButton.new()
+	# fit_to_longest_item=false + largeur figée : sans ça, la taille minimale
+	# s'aligne sur l'item désactivé le plus large et peut élargir toute cette
+	# colonne au-delà de sa largeur prévue (piège déjà rencontré et corrigé
+	# sur le menu "Regrouper par :", voir CLAUDE.md — appliqué ici par
+	# précaution, avant qu'un bug similaire n'apparaisse).
+	mode.fit_to_longest_item = false
+	mode.clip_text = true
+	mode.custom_minimum_size = Vector2(200.0, 0.0)
 	mode.add_item("Leaderboard local")
-	mode.add_item("Leaderboard en ligne (bientôt disponible)")
-	mode.select(0)
+	mode.add_item("Leaderboard mondial (bientôt disponible)")
 	mode.set_item_disabled(1, true)
+	# Structure prête, pas encore de site/backend (CLAUDE.md, "Ce qu'il ne
+	# faut pas faire") : mêmes placeholders désactivés que le reste de cet
+	# écran (Options de jeu, sections du menu "Regrouper par :").
+	mode.add_item("Leaderboard national (bientôt disponible)")
+	mode.set_item_disabled(2, true)
+	mode.add_item("Leaderboard amis (bientôt disponible)")
+	mode.set_item_disabled(3, true)
+	mode.select(0)
 	col.add_child(mode)
 
 	var scroll := ScrollContainer.new()
@@ -769,6 +779,12 @@ func _build_bottom_bar(parent: VBoxContainer) -> void:
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# IGNORE, pas le défaut STOP d'un Control nu : ce spacer occupe une zone
+	# potentiellement large (EXPAND_FILL) et avalait silencieusement les clics
+	# qui y atterrissaient, avant même d'atteindre `bg` (voir son propre
+	# commentaire) ou _unhandled_input() — un deuxième endroit où le clic
+	# "en dehors du champ de recherche" pouvait mourir sans rien faire.
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(spacer)
 
 	_play_button = Button.new()
@@ -832,6 +848,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _root_layout.visible and event.is_action_pressed("ui_cancel"):
 		_on_back_pressed()
 		get_viewport().set_input_as_handled()
+
+# _input(), PAS _unhandled_input() : ce dernier ne reçoit un clic QUE si
+# aucun Control ne l'a consommé avant (mouse_filter STOP, même sans aucun
+# handler) — en pratique le clic n'atteignait jamais _unhandled_input() ici
+# (vérifié par trace : jamais une seule fois, même après avoir mis IGNORE
+# sur le fond et les spacers), pour une raison qui reste incertaine dans
+# cette arborescence profondément imbriquée. _input() s'exécute AVANT tout
+# le système de Control, donc voit CE clic sans dépendre de la chaîne
+# mouse_filter — vérification de position directe plutôt que de compter sur
+# le fait qu'aucun autre Control ne l'ait réclamé.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and _search_edit.has_focus():
+		var click_pos: Vector2 = (event as InputEventMouseButton).position
+		if not _search_edit.get_global_rect().has_point(click_pos):
+			_search_edit.release_focus()
 
 func _on_play_pressed() -> void:
 	if _selected.is_empty():
