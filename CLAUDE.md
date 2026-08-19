@@ -105,6 +105,31 @@ ensuite, y compris avec `grow_horizontal`/`vertical = GROW_DIRECTION_BOTH`
 (tenté puis abandonné pour un centrage manuel de `vbox` : résultat bien
 pire qu'avec `CenterContainer`, voir `ui/ghost_menu.gd`).
 
+Piège rencontré, à part mais dans la même famille (rebuild dynamique d'une
+liste de lignes UI) : `queue_free()` seul, sans `remove_child()` avant, sur
+les enfants d'un conteneur qu'on vide pour le reconstruire (patron
+`for child in container.get_children(): child.queue_free()`, très courant
+dans `ui/`) — `queue_free()` diffère la suppression réelle à la fin du
+frame, donc toute mesure de taille effectuée dans la MÊME fonction juste
+après (`get_combined_minimum_size()`, positionnement d'un panneau calculé
+sur cette taille) compte encore les anciennes lignes EN PLUS des nouvelles,
+avant qu'elles ne soient réellement enfin retirées. Bug réel rencontré dans
+`ui/vehicle_menu.gd` : la position du menu déroulant (calculée une fois par
+ouverture, jamais recalculée automatiquement ensuite — pas de
+`CenterContainer` derrière) était correcte à la première ouverture puis
+décalée d'un espace vide aux suivantes, exactement la taille des lignes en
+trop. Corrigé partout où ce patron de reconstruction existe (`ui/vehicle_
+menu.gd::_refresh()`, `ui/ghost_menu.gd::_clear()`) en appelant
+`container.remove_child(child)` avant `child.queue_free()` — retire
+immédiatement de l'arbre (donc du calcul de taille), sans rien changer à la
+suppression différée elle-même (toujours sûre). Un écran dont le
+repositionnement passe par un vrai Container (`CenterContainer` en continu,
+via le moteur) est moins exposé — un frame de trop s'auto-corrige au
+suivant — mais un panneau positionné une fois manuellement (comme
+`ui/vehicle_menu.gd`) ne se corrige jamais tout seul : à vérifier à chaque
+nouvel écran qui reconstruit une liste ET se positionne/dimensionne
+manuellement dans la même fonction.
+
 ---
 
 ## Règles non négociables
@@ -310,11 +335,12 @@ profil joueur en placeholder désactivé — définis plus tard) ; sélectionner
 une piste recadre un aperçu 3D (`TrackMesh` dans un second `SubViewport`,
 caméra orthogonale cadrée sur les bornes XZ de la piste) et rafraîchit le
 panneau leaderboard local (voir ci-dessous) et le record personnel. Le
-bouton « Changer de véhicule » y ouvre l'overlay `ui/vehicle_menu.gd` — le
-choix du véhicule a déménagé ici, il n'y a plus de bouton Véhicule dans le
-menu principal. « Options de jeu » et « Choisir un fantôme » (étape 5) sont
-des placeholders désactivés. « JOUER » passe par `Session` comme
-« Jouer cette piste » de l'éditeur.
+bouton « Changer de véhicule » y ouvre `ui/vehicle_menu.gd`, un menu
+déroulant ancré juste au-dessus de ce bouton (pas un overlay plein écran —
+voir plus bas) — le choix du véhicule a déménagé ici, il n'y a plus de
+bouton Véhicule dans le menu principal. « Options de jeu » est un
+placeholder désactivé. « JOUER » passe par `Session` comme « Jouer cette
+piste » de l'éditeur.
 
 **Menu contextuel et collections (`ui/track_select.gd`, `ui/collections.gd`,
 `ui/collections_menu.gd`).** Clic droit sur une piste → `PopupMenu` adapté
@@ -774,6 +800,48 @@ l'extraction depuis `tools/run_tests.gd::_hash_state()` reste prouvée
 neutre (`REFERENCE_HASH` inchangé) ; à combler dans un lot séparé avec
 régénération explicite du hash.
 
+**Menu déroulant de véhicule (`ui/vehicle_menu.gd`).** Sur demande explicite
+(maquette utilisateur) : l'ancien overlay plein écran « Choix du véhicule »
+(assombrissait tout l'arrière-plan, listait référence + geste par véhicule)
+est remplacé par un petit menu déroulant ancré juste au-dessus du bouton
+« Changer de véhicule » de `ui/track_select.gd` — le reste de l'écran
+(leaderboard, aperçu, liste des pistes) reste visible et net derrière,
+aucun assombrissement. Cliquer un véhicule le sélectionne ET ferme le menu
+(comportement dropdown, pas de bouton « Retour ») ; cliquer n'importe où
+ailleurs sur l'écran ou Échap ferme sans rien changer (`_on_background_input()`
+sur un `Control` plein écran invisible, mouse_filter STOP — les clics sur
+le petit panneau lui-même ne remontent jamais jusque-là, comportement
+standard de propagation des `Control` imbriqués). Seuls les noms des
+véhicules sont listés (pas référence/geste, qui restent dans
+`ui/vehicle_roster.gd` et `docs/matrice-vehicules.md` si besoin ailleurs).
+
+Position et taille de ce petit panneau calculées directement sur
+`_anchor_button.global_position`/`.size` et `get_viewport_rect()` — jamais
+via les ancrages Godot, pour la même raison que `ui/ghost_menu.gd` (voir le
+piège `PRESET_FULL_RECT` en tête de ce fichier) : ce nœud est créé puis
+`.hide()`é avant que son parent ait sa taille finale. Bug réel trouvé et
+corrigé pendant ce lot, distinct de celui de `GhostMenu` mais dans la même
+famille (voir le piège `remove_child()`/`queue_free()` en tête de ce
+fichier) : `_refresh()` reconstruit les lignes du menu à chaque ouverture ;
+sans `remove_child()` avant `queue_free()`, la hauteur du panneau (calculée
+juste après, pour le positionner) comptait encore les anciennes lignes en
+plus des nouvelles — correct à la première ouverture, décalé (un grand
+espace vide sous « Halcyon ») à partir de la deuxième. `ui/ghost_menu.gd`
+avait le même patron de reconstruction (protégé de la même conséquence
+visible par `CenterContainer`, qui se re-corrige tout seul au frame
+suivant) — corrigé par précaution aux deux endroits.
+
+Second bug trouvé et corrigé, purement visuel : `focus_first()` donnait
+systématiquement le focus clavier à la PREMIÈRE ligne (Roadster), pas au
+véhicule réellement sélectionné — l'anneau de focus par défaut de Godot
+(toujours visible sur la ligne qui a le focus) restait donc figé sur
+Roadster à chaque ouverture, quel que soit le véhicule choisi. Une première
+correction a fait pointer le focus sur le véhicule réellement sélectionné
+ET ajouté une coloration verte du texte comme second indicateur — jugée
+inutile et mal rendue à l'usage (retour utilisateur direct), retirée :
+l'anneau de focus (désormais correctement positionné) reste le seul
+indicateur de sélection à l'ouverture du menu.
+
 ---
 
 ## Vocabulaire du projet
@@ -1232,6 +1300,26 @@ voit JAMAIS : seul un lancement en jeu (ou un script headless ciblé) les
 révèle. Diagnostic de centrage vérifié en jeu via impressions console
 temporaires (retirées) avant validation visuelle par l'utilisateur, qui a
 confirmé le résultat final correct après ces deux correctifs.
+
+**Menu déroulant de véhicule (`ui/vehicle_menu.gd`, `ui/track_select.gd`).**
+Sur demande explicite (maquette utilisateur) : remplace l'ancien overlay
+plein écran par un petit menu déroulant ancré au-dessus du bouton
+« Changer de véhicule », arrière-plan resté visible. Détail complet
+(mécanisme de positionnement, deux bugs trouvés et corrigés en cours de
+route — hauteur du panneau décalée à partir de la deuxième ouverture,
+focus clavier toujours sur Roadster au lieu du véhicule réellement
+sélectionné) dans « Menu déroulant de véhicule » plus haut dans
+Architecture. Décision de conception prise avec l'utilisateur après
+premier essai : une coloration verte du texte comme indicateur de
+sélection secondaire (même idée que les pastilles de `ui/ghost_menu.gd`)
+a été ajoutée puis retirée sur retour direct (« mal fait et pas vraiment
+utile ») — l'anneau de focus, désormais correctement positionné sur le
+véhicule sélectionné, reste le seul indicateur. Testé : `tools/run_tests.gd`
+passe (240 tests, hash de régression inchangé — ce lot ne touche que de
+l'UI, rien dans `sim/`) ; les deux bugs de ce lot n'étaient visibles qu'en
+jeu (même limite de la suite de tests que documentée juste au-dessus),
+chacun corrigé après reproduction manuelle par l'utilisateur puis
+validation par relance du jeu.
 
 Ordre de travail retenu :
 

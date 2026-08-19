@@ -160,11 +160,22 @@ func _refresh() -> void:
 	_refresh_perso()
 	_refresh_pinned()
 
+# remove_child() AVANT queue_free(), pas juste queue_free() seul : ce
+# dernier diffère la suppression réelle à la fin du frame, donc une mesure
+# de taille immédiatement après (min_size d'un parent, get_child_count())
+# compterait encore les anciennes lignes EN PLUS des nouvelles. Bug réel
+# rencontré avec exactement ce patron dans ui/vehicle_menu.gd (position d'un
+# panneau calculée trop grande une ouverture sur deux) — même précaution
+# prise ici avant que ça ne se manifeste ici aussi.
+func _clear(container: Node) -> void:
+	for child in container.get_children():
+		container.remove_child(child)
+		child.queue_free()
+
 # ------------------------------------------------------------- aucun fantôme --
 
 func _refresh_none_row() -> void:
-	for child in _none_container.get_children():
-		child.queue_free()
+	_clear(_none_container)
 	# largeur_fixe=300.0 : EXACTEMENT la largeur d'une colonne
 	# (custom_minimum_size de _build_column()), pour que "Aucun fantôme" soit
 	# de la même taille que les autres boutons de fantôme, pas une bande
@@ -183,8 +194,7 @@ func _refresh_none_row() -> void:
 # "Bientôt disponible" qui décalerait cette colonne par rapport aux autres,
 # sur demande explicite (l'absence de score suffit).
 func _refresh_mondiaux() -> void:
-	for child in _mondiaux_rows.get_children():
-		child.queue_free()
+	_clear(_mondiaux_rows)
 
 	_mondiaux_rows.add_child(_build_disabled_row("Véhicule courant"))
 	for vehicle in VehicleRoster.VEHICLES:
@@ -193,8 +203,7 @@ func _refresh_mondiaux() -> void:
 # ---------------------------------------------------------------- mes records --
 
 func _refresh_perso() -> void:
-	for child in _perso_rows.get_children():
-		child.queue_free()
+	_clear(_perso_rows)
 
 	var runs: Array[Dictionary] = Leaderboard.runs(_track_uid)
 
@@ -221,8 +230,7 @@ func _refresh_perso() -> void:
 # ---------------------------------------------------------- fantômes enregistrés --
 
 func _refresh_pinned() -> void:
-	for child in _pinned_rows.get_children():
-		child.queue_free()
+	_clear(_pinned_rows)
 
 	var entries: Array[Dictionary] = []
 	for entry in Leaderboard.pinned_runs(_track_uid):

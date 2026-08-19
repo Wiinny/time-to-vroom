@@ -33,6 +33,7 @@ var _collections_menu: CollectionsMenu
 var _ghost_menu: GhostMenu
 var _play_button: Button
 var _ghost_button: Button
+var _vehicle_button: Button
 
 var _all_tracks: Array[Dictionary] = []
 var _selected: Dictionary = {}  # entrée de TrackCatalog.list_tracks(), {} si aucune
@@ -643,10 +644,10 @@ func _build_bottom_bar(parent: VBoxContainer) -> void:
 	_ghost_button.pressed.connect(_on_ghost_pressed)
 	bar.add_child(_ghost_button)
 
-	var vehicle := Button.new()
-	vehicle.text = "Changer de véhicule"
-	vehicle.pressed.connect(_on_vehicle_pressed)
-	bar.add_child(vehicle)
+	_vehicle_button = Button.new()
+	_vehicle_button.text = "Changer de véhicule"
+	_vehicle_button.pressed.connect(_on_vehicle_pressed)
+	bar.add_child(_vehicle_button)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -659,17 +660,23 @@ func _build_bottom_bar(parent: VBoxContainer) -> void:
 	_play_button.pressed.connect(_on_play_pressed)
 	bar.add_child(_play_button)
 
+# Dropdown au-dessus du bouton, PAS un overlay plein écran (maquette
+# utilisateur) : _root_layout reste visible en fond, pas de hide()/show()
+# ici. Bascule : ré-appuyer sur le bouton pendant que le menu est ouvert le
+# referme sans repasser par _on_vehicle_menu_closed() (même résultat).
 func _on_vehicle_pressed() -> void:
-	_root_layout.hide()
+	if _vehicle_menu.visible:
+		_vehicle_menu.hide()
+		return
+	_vehicle_menu.open_above(_vehicle_button)
 	_vehicle_menu.show()
 	_vehicle_menu.focus_first()
 
 func _on_vehicle_menu_closed() -> void:
 	_vehicle_menu.hide()
-	_root_layout.show()
 	_refresh_personal_best()  # dépend du véhicule sélectionné, peut avoir changé
 	_refresh_ghost_button()  # idem pour un fantôme en mode "véhicule courant"
-	_play_button.grab_focus()
+	_vehicle_button.grab_focus()
 
 func _on_ghost_pressed() -> void:
 	if _selected.is_empty():
