@@ -1,14 +1,7 @@
-# Harness de déterminisme, sans dépendance externe.
-#   "$GODOT" --headless --path . --script res://tools/run_tests.gd
-# Code de sortie non nul si un test échoue (utilisable en CI).
-#
-# En cas d'échec de la régression après un changement volontaire du modèle
-# de conduite (sim/car_sim.gd, sim/car_config.gd, map/track_hardcoded.gd...),
-# remplacer REFERENCE_HASH par la valeur affichée dans le message d'échec.
 extends SceneTree
 
-const REFERENCE_HASH: int = 2224413573259929705  # régénéré après la hausse de decel_naturelle_ms2 du Roadster (5.0->12.0)
-const SEQUENCE_LENGTH: int = 6000  # une minute à la cadence de Horloge.TICKS_PAR_SECONDE
+const REFERENCE_HASH: int = 3586582507276794061  
+const SEQUENCE_LENGTH: int = 6000 
 
 var _passes: int = 0
 var _failures: int = 0
@@ -67,8 +60,6 @@ func _build_test_world() -> World:
 	var config: CarConfig = CarConfig.new()
 	var world: World = World.new()
 	var start: PackedInt64Array = TrackHardcoded.start_transform()
-	# start est déjà en Q16.16 (même contrat que main.gd, voir TrackHardcoded/
-	# TrackData.start_transform()) : pas de Fixed.from_int() ici.
 	world.setup(
 		track, config,
 		int(start[0]), int(start[1]), int(start[2]),
@@ -76,8 +67,6 @@ func _build_test_world() -> World:
 	)
 	return world
 
-# Séquence d'entrées figée et déterministe (pas d'aléatoire) : accélère,
-# freine, et braque en triangle des deux côtés pour exercer le modèle.
 func _make_input_sequence(n: int) -> Array[InputFrame]:
 	var seq: Array[InputFrame] = []
 	for i in range(n):
@@ -96,8 +85,6 @@ func _make_input_sequence(n: int) -> Array[InputFrame]:
 			tri = Fixed.ONE - Fixed.div(Fixed.from_int(steer_phase - 180), Fixed.from_int(90))
 		f.braquage = Fixed.clamp(tri, -Fixed.ONE, Fixed.ONE)
 
-		# Phase dérapage déterministe : sans elle, tout le code de glisse/saut
-		# (sim/car_sim.gd) reste un angle mort de la régression.
 		if i % 300 >= 60 and i % 300 < 200:
 			f.derapage = Fixed.ONE
 
@@ -105,9 +92,6 @@ func _make_input_sequence(n: int) -> Array[InputFrame]:
 	return seq
 
 func _hash_state(world: World) -> int:
-	# Délègue à CarState.compute_hash() (extrait de cette fonction) — voir
-	# replay/replay_data.gd, qui réutilise le même hash pour valider un
-	# replay.
 	return world.state_hash()
 
 func _run_sequence(seq: Array[InputFrame]) -> int:
@@ -116,10 +100,6 @@ func _run_sequence(seq: Array[InputFrame]) -> int:
 		world.tick(f)
 	return _hash_state(world)
 
-# Comme _run_sequence(), mais sur une piste/config données au lieu de
-# _build_test_world() — utilisé pour vérifier qu'un élément Lot B (posé,
-# mais sans effet) laisse le hash identique à une piste sans éléments (voir
-# _test_element_sans_effet).
 func _run_sequence_sur_piste(track: Track, config: CarConfig, seq: Array[InputFrame]) -> int:
 	var world := World.new()
 	var start: PackedInt64Array = TrackHardcoded.start_transform()
@@ -148,46 +128,40 @@ func _test_regression() -> void:
 		print("  remplacer REFERENCE_HASH dans tools/run_tests.gd par ", h, ".")
 
 func _test_race_state() -> void:
-	# Piste jouet à deux points : segment 0 va de (0,0) à (0,10), tangente
-	# +Z, demi-largeur 5 m — suffisant pour tester la porte d'arrivée sans
-	# passer par TrackHardcoded.
 	var track := Track.new()
 	track.add_point(Fixed.from_int(0), 0, Fixed.from_int(0), Fixed.from_int(5))
 	track.add_point(Fixed.from_int(0), 0, Fixed.from_int(10), Fixed.from_int(5))
 
 	var rs1 := RaceState.new()
-	rs1.setup(track)
+	rs1.setup(track, false)
 	rs1.reset()
 	rs1.tick(0, Fixed.from_int(-1), 0, Fixed.from_int(1), 1, true)
 	_check("race_state: pas d'arrivée avant d'être parti", not rs1.finished)
 
 	var rs2 := RaceState.new()
-	rs2.setup(track)
+	rs2.setup(track, false)
 	rs2.reset()
-	rs2.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true)   # part, dépasse le seuil de 3 m
-	rs2.tick(0, Fixed.from_int(-1), 0, Fixed.from_int(1), 2, true)  # revient et franchit dans le bon sens
+	rs2.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true) 
+	rs2.tick(0, Fixed.from_int(-1), 0, Fixed.from_int(1), 2, true) 
 	_check("race_state: arrivée valide après un tour", rs2.finished)
-	# Franchissement exactement à mi-chemin entre les ticks 1 et 2 (z va de -1
-	# à +1) : elapsed = 0,5 tick = 5 ms à 100 Hz — vérifie à la fois le calcul
-	# relatif au premier input ET l'interpolation au sous-tick.
 	_check("race_state: finish_ms interpolé au sous-tick (départ au tick 1, franchissement à mi-tick)", rs2.finish_ms == 5)
 
 	var rs3 := RaceState.new()
-	rs3.setup(track)
+	rs3.setup(track, false)
 	rs3.reset()
 	rs3.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true)
-	rs3.tick(0, Fixed.from_int(1), 0, Fixed.from_int(-1), 2, true)  # franchit en sens inverse
+	rs3.tick(0, Fixed.from_int(1), 0, Fixed.from_int(-1), 2, true)  
 	_check("race_state: pas d'arrivée en sens inverse", not rs3.finished)
 
 	var rs4 := RaceState.new()
-	rs4.setup(track)
+	rs4.setup(track, false)
 	rs4.reset()
 	rs4.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true)
-	rs4.tick(Fixed.from_int(10), Fixed.from_int(-1), Fixed.from_int(10), Fixed.from_int(1), 2, true)  # hors largeur (x=10)
+	rs4.tick(Fixed.from_int(10), Fixed.from_int(-1), Fixed.from_int(10), Fixed.from_int(1), 2, true) 
 	_check("race_state: pas d'arrivée hors largeur de piste", not rs4.finished)
 
 	var rs5 := RaceState.new()
-	rs5.setup(track)
+	rs5.setup(track, false)
 	rs5.reset()
 	rs5.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true)
 	rs5.tick(0, Fixed.from_int(5), 0, Fixed.from_int(5), RaceState.TIME_LIMIT_TICKS, true)
@@ -196,29 +170,25 @@ func _test_race_state() -> void:
 	_check("race_state: temps écoulé à 30:00.000 pile", rs5.timed_out)
 
 	var rs6 := RaceState.new()
-	rs6.setup(track)
+	rs6.setup(track, false)
 	rs6.reset()
 	rs6.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true)
 	rs6.tick(0, Fixed.from_int(5), 0, Fixed.from_int(5), RaceState.TIME_LIMIT_TICKS + 1, true)
-	rs6.tick(0, Fixed.from_int(-1), 0, Fixed.from_int(1), RaceState.TIME_LIMIT_TICKS + 2, true)  # franchirait sinon
+	rs6.tick(0, Fixed.from_int(-1), 0, Fixed.from_int(1), RaceState.TIME_LIMIT_TICKS + 2, true)  
 	_check("race_state: le temps écoulé bloque toute arrivée ultérieure", not rs6.finished)
 
-	# Le chrono ne démarre qu'au premier input actif du joueur.
 	var rs7 := RaceState.new()
-	rs7.setup(track)
+	rs7.setup(track, false)
 	rs7.reset()
-	rs7.tick(0, 0, 0, 0, 5, false)  # 5 ticks d'attente, aucun input
+	rs7.tick(0, 0, 0, 0, 5, false) 
 	_check("race_state: pas parti tant qu'aucun input n'est actif", not rs7.started)
 	_check("race_state: chrono à zéro tant qu'aucun input n'est actif", rs7.current_elapsed == 0)
-	rs7.tick(0, 0, 0, Fixed.from_int(1), 6, true)  # premier input, au tick 6
+	rs7.tick(0, 0, 0, Fixed.from_int(1), 6, true) 
 	_check("race_state: parti dès le premier input", rs7.started)
 	_check("race_state: chrono à zéro pile au premier input", rs7.current_elapsed == 0)
 	rs7.tick(0, Fixed.from_int(1), 0, Fixed.from_int(2), 7, true)
 	_check("race_state: chrono relatif au premier input, pas au tick absolu", rs7.current_elapsed == 1)
 
-# Piste OUVERTE (point à point) : départ au point 0, arrivée sur le DERNIER
-# segment. Trois points alignés sur +Z : (0,0) -> (0,50) -> (0,60), donc la
-# porte est en z = 50 (début du dernier segment) et non en z = 0.
 func _test_race_state_ouverte() -> void:
 	var track := Track.new()
 	track.est_ferme = false
@@ -226,21 +196,16 @@ func _test_race_state_ouverte() -> void:
 	track.add_point(Fixed.from_int(0), 0, Fixed.from_int(50), Fixed.from_int(5))
 	track.add_point(Fixed.from_int(0), 0, Fixed.from_int(60), Fixed.from_int(5))
 
-	# Aucune attente d'éloignement : le premier franchissement vers l'avant
-	# compte. Le premier tick de chaque séquence ne fait que démarrer le
-	# chrono loin de la porte (sinon current_elapsed == 0 donnerait un
-	# finish_ms négatif, cf. RaceState.tick() : elapsed_fixed utilise
-	# current_elapsed - 1).
 	var rs1 := RaceState.new()
-	rs1.setup(track)
+	rs1.setup(track, false)
 	rs1.reset()
-	rs1.tick(0, Fixed.from_int(0), 0, Fixed.from_int(10), 1, true)   # démarre le chrono, loin de la porte
-	rs1.tick(0, Fixed.from_int(49), 0, Fixed.from_int(51), 2, true)  # franchit à mi-tick
+	rs1.tick(0, Fixed.from_int(0), 0, Fixed.from_int(10), 1, true)  
+	rs1.tick(0, Fixed.from_int(49), 0, Fixed.from_int(51), 2, true) 
 	_check("race_state ouverte: arrivée dès le premier franchissement, sans attendre l'éloignement", rs1.finished)
 	_check("race_state ouverte: finish_ms interpolé au sous-tick", rs1.finish_ms == 5)
 
 	var rs2 := RaceState.new()
-	rs2.setup(track)
+	rs2.setup(track, false)
 	rs2.reset()
 	rs2.tick(0, Fixed.from_int(0), 0, Fixed.from_int(10), 1, true)
 	rs2.tick(0, Fixed.from_int(10), 0, Fixed.from_int(40), 2, true)
@@ -249,28 +214,25 @@ func _test_race_state_ouverte() -> void:
 	_check("race_state ouverte: arrivée à la porte du dernier segment", rs2.finished)
 
 	var rs3 := RaceState.new()
-	rs3.setup(track)
+	rs3.setup(track, false)
 	rs3.reset()
 	rs3.tick(0, Fixed.from_int(55), 0, Fixed.from_int(52), 1, true)
-	rs3.tick(0, Fixed.from_int(52), 0, Fixed.from_int(45), 2, true)  # franchit en sens inverse
+	rs3.tick(0, Fixed.from_int(52), 0, Fixed.from_int(45), 2, true)  
 	_check("race_state ouverte: pas d'arrivée en sens inverse", not rs3.finished)
 
 	var rs4 := RaceState.new()
-	rs4.setup(track)
+	rs4.setup(track, false)
 	rs4.reset()
 	rs4.tick(Fixed.from_int(10), Fixed.from_int(0), Fixed.from_int(10), Fixed.from_int(10), 1, true)
-	rs4.tick(Fixed.from_int(10), Fixed.from_int(49), Fixed.from_int(10), Fixed.from_int(51), 2, true)  # hors largeur
+	rs4.tick(Fixed.from_int(10), Fixed.from_int(49), Fixed.from_int(10), Fixed.from_int(51), 2, true)  
 	_check("race_state ouverte: pas d'arrivée hors largeur de piste", not rs4.finished)
 
-	# Contre-test : même géométrie, mais FERMÉE — la porte doit rester au
-	# segment 0. Verrouille que la nouvelle branche ne fuit pas sur les
-	# pistes existantes (circuits).
 	var ferme := Track.new()
 	ferme.add_point(Fixed.from_int(0), 0, Fixed.from_int(0), Fixed.from_int(5))
 	ferme.add_point(Fixed.from_int(0), 0, Fixed.from_int(50), Fixed.from_int(5))
 	ferme.add_point(Fixed.from_int(0), 0, Fixed.from_int(60), Fixed.from_int(5))
 	var rs5 := RaceState.new()
-	rs5.setup(ferme)
+	rs5.setup(ferme, false)
 	rs5.reset()
 	rs5.tick(0, Fixed.from_int(49), 0, Fixed.from_int(51), 1, true)
 	_check("race_state fermée: rien ne se déclenche à z=50 (la porte n'est pas au dernier segment)", not rs5.finished)
@@ -279,20 +241,86 @@ func _test_race_state_ouverte() -> void:
 	rs5.tick(0, Fixed.from_int(-1), 0, Fixed.from_int(1), 3, true)
 	_check("race_state fermée: la porte est bien restée au segment 0", rs5.finished)
 
-# Verrouille le cap dérivé du segment 0->1 (piège corrigé : TrackData
-# renvoyait auparavant un cap figé à 0 quelle que soit l'orientation du
-# tracé, cf. map/track_data.gd::start_transform()).
+func _validation_track() -> Track:
+	var track := Track.new()
+	track.add_point(Fixed.from_int(0), 0, Fixed.from_int(0), Fixed.from_int(5))
+	track.add_point(Fixed.from_int(0), 0, Fixed.from_int(40), Fixed.from_int(5))
+	track.add_point(Fixed.from_int(40), 0, Fixed.from_int(40), Fixed.from_int(5))
+	track.add_point(Fixed.from_int(40), 0, Fixed.from_int(-20), Fixed.from_int(5))
+	track.add_point(Fixed.from_int(0), 0, Fixed.from_int(-20), Fixed.from_int(5))
+	return track
+
+func _drive_validation_line(rs: RaceState, ax: int, az: int, bx: int, bz: int, tick_start: int) -> int:
+	var dx: int = bx - ax
+	var dz: int = bz - az
+	var length: int = FixedMath.sqrt(Fixed.mul(dx, dx) + Fixed.mul(dz, dz))
+	var step_size: int = Fixed.from_int(2)
+	var steps: int = maxi(1, (length + step_size - 1) / step_size)
+	var prev_x: int = ax
+	var prev_z: int = az
+	var tick: int = tick_start
+	for step in range(1, steps + 1):
+		var t: int = Fixed.div(Fixed.from_int(step), Fixed.from_int(steps))
+		var cur_x: int = ax + Fixed.mul(dx, t)
+		var cur_z: int = az + Fixed.mul(dz, t)
+		tick += 1
+		rs.tick(prev_x, prev_z, cur_x, cur_z, tick, true)
+		prev_x = cur_x
+		prev_z = cur_z
+	return tick
+
+func _test_progress_validation() -> void:
+	var track: Track = _validation_track()
+	var valid := RaceState.new()
+	valid.setup(track)
+	valid.reset()
+	var tick: int = 0
+	for i in range(track.point_count()):
+		var j: int = (i + 1) % track.point_count()
+		tick = _drive_validation_line(valid, track.point_x[i], track.point_z[i], track.point_x[j], track.point_z[j], tick)
+	tick = _drive_validation_line(valid, track.point_x[0], track.point_z[0], track.point_x[0], Fixed.from_int(2), tick)
+	_check("validation parcours: un tour complet valide toutes les zones", valid.validated_zone_count == valid.validation_zone_count)
+	_check("validation parcours: arrivée acceptée après le tracé complet", valid.finished and valid.run_valid)
+
+	var shortcut := RaceState.new()
+	shortcut.setup(track)
+	shortcut.reset()
+	tick = _drive_validation_line(shortcut, track.point_x[0], track.point_z[0], track.point_x[0], Fixed.from_int(20), 0)
+	tick = _drive_validation_line(shortcut, track.point_x[0], Fixed.from_int(20), track.point_x[0], track.point_z[0], tick)
+	_drive_validation_line(shortcut, track.point_x[0], track.point_z[0], track.point_x[0], Fixed.from_int(2), tick)
+	_check("validation parcours: un aller-retour sur la même portion ne termine pas la course", not shortcut.finished)
+	_check("validation parcours: les zones non parcourues restent non validées", shortcut.validated_zone_count < shortcut.validation_zone_count)
+
+	var jump := RaceState.new()
+	jump.setup(track)
+	jump.reset()
+	jump.tick(0, 0, 0, Fixed.from_int(2), 1, true)
+	jump.tick(0, Fixed.from_int(2), Fixed.from_int(40), Fixed.from_int(40), 2, true)
+	_check("validation parcours: un saut de progression impossible invalide le run", not jump.run_valid and not jump.finished)
+
+func _test_collision_gabarit() -> void:
+	var track := Track.new()
+	track.est_ferme = false
+	track.add_point(0, 0, 0, Fixed.from_int(5))
+	track.add_point(0, 0, Fixed.from_int(100), Fixed.from_int(5))
+	var state := CarState.new()
+	state.reset(Fixed.from_float(4.8), 0, Fixed.from_int(10), 0)
+	var config := CarConfig.new()
+	config.bake()
+	var input := InputFrame.new()
+	var query := TrackQueryResult.new()
+	CarSim.tick(state, input, track, config, query)
+	var expected_limit: int = Fixed.from_int(5) - ReglesCommunes.demi_largeur_vehicule
+	_check("collision piste: le bord du véhicule, pas son centre, reste dans le mur", Fixed.abs(state.pos_x) <= expected_limit)
+
 func _test_track_data_start_transform() -> void:
 	var data := TrackData.new()
 	data.add_point(Fixed.from_int(0), 0, Fixed.from_int(0), Fixed.from_int(5))
-	data.add_point(Fixed.from_int(10), 0, Fixed.from_int(0), Fixed.from_int(5))  # segment 0->1 vers +X, pas +Z
+	data.add_point(Fixed.from_int(10), 0, Fixed.from_int(0), Fixed.from_int(5))
 	var start: PackedInt64Array = data.start_transform()
 	_check_approx("TrackData.start_transform: cap dérivé du segment 0->1 (vers +X ici)", int(start[3]), FixedMath.QUARTER_TURN, 2)
 	_check("TrackData.start_transform: position en Q16.16 telle quelle (pas de reconversion)", int(start[0]) == 0 and int(start[2]) == 0)
 
-# Piste très large (500 m de demi-largeur), utilisée par les tests de
-# latéral/glisse pour isoler le mécanisme testé des murs — TrackHardcoded
-# est trop étroite (5 m) pour un virage serré à haute vitesse.
 func _build_wide_track() -> Track:
 	var track := Track.new()
 	track.add_point(Fixed.from_int(-1000), 0, Fixed.from_int(-1000), Fixed.from_int(500))
@@ -301,16 +329,11 @@ func _build_wide_track() -> Track:
 	track.add_point(Fixed.from_int(-1000), 0, Fixed.from_int(1000), Fixed.from_int(500))
 	return track
 
-# Piste large (voir _build_wide_track) + un seul élément posé en (x, z) —
-# pour les tests d'éléments de piste (Lot A), isolés de tout autre effet.
 func _build_element_track(kind: int, x: int, z: int) -> Track:
 	var track: Track = _build_wide_track()
 	track.add_element(kind, x, 0, z, 0)
 	return track
 
-# Vitesse latérale du vecteur vitesse dans le repère courant (right = 90° à
-# droite de yaw) — pas la vitesse latérale "de tick" interne à CarSim.tick,
-# recalculée ici depuis l'état final pour ne rien supposer de l'implémentation.
 func _lateral_speed(state: CarState) -> int:
 	var fwd_x: int = FixedMath.sin(state.yaw)
 	var fwd_z: int = FixedMath.cos(state.yaw)
@@ -322,7 +345,7 @@ func _test_courbe_accel() -> void:
 	var input := InputFrame.new()
 	input.accel = Fixed.ONE
 
-	var config := CarConfigGt.new()  # Roadster : accel_basse=11.0, accel_haute=3.5 (vraie marche)
+	var config := CarConfigGt.new() 
 	config.bake()
 
 	var state_bas := CarState.new()
@@ -344,31 +367,19 @@ func _test_courbe_accel() -> void:
 	var delta_mid: int = state_mid.vit_z - config.palier_accel / 2
 	_check("courbe d'accel monotone entre accel_basse et accel_haute", delta_mid < config.accel_basse and delta_mid > config.accel_haute)
 
-	var config_lin := CarConfigFormula.new()  # Needle : accel_basse == accel_haute ("courbe linéaire")
+	var config_lin := CarConfigFormula.new() 
 	config_lin.bake()
 	var state_lin_bas := CarState.new()
 	state_lin_bas.reset(0, 0, 0, 0)
 	CarSim.tick(state_lin_bas, input, track, config_lin, query)
 	var state_lin_mid := CarState.new()
 	state_lin_mid.reset(0, 0, 0, 0)
-	# Needle a palier_accel == vitesse_max : tester exactement à palier_accel
-	# ferait interférer le clamp de plafond de vitesse avec la mesure — on
-	# reste sous le plafond, à mi-palier, comme le test "monotone" ci-dessus.
 	state_lin_mid.vit_z = config_lin.palier_accel / 2
 	CarSim.tick(state_lin_mid, input, track, config_lin, query)
 	var delta_lin_mid: int = state_lin_mid.vit_z - config_lin.palier_accel / 2
 	_check_approx("courbe linéaire (accel_basse==accel_haute) constante quel que soit v", state_lin_bas.vit_z, delta_lin_mid, 4)
 
 func _test_echelle_rotation() -> void:
-	# Verrouille un bug réel rencontré : Δψ = mul(mul(v, inv_empattement),
-	# angle_effectif) mélangeait par erreur Fixed.mul() (réservé à deux
-	# grandeurs Q16.16, ou une grandeur brute × une fraction Q16.16) avec un
-	# angle_effectif en unités BRUTES générales — le résultat était divisé
-	# par 65536 de trop, si bien que le yaw ne tournait quasiment jamais (la
-	# voiture restait plaquée contre le premier mur de TrackHardcoded,
-	# détecté en mesurant le banc d'équilibrage). Vitesse volontairement
-	# faible pour rester sous le seuil d'écrêtage par l'adhérence (dpsi non
-	# clampé), afin de comparer directement à la formule bicyclette.
 	var config := CarConfigGt.new()
 	config.bake()
 	var track: Track = _build_wide_track()
@@ -378,16 +389,12 @@ func _test_echelle_rotation() -> void:
 	input.braquage = Fixed.ONE
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
-	state.vit_z = Fixed.from_float(20.0 / 3.6 / float(Horloge.TICKS_PAR_SECONDE))  # 20 km/h -> m/tick, en dessous de tout écrêtage
-	var v_avant: int = FixedMath.length_2d(state.vit_x, state.vit_z)  # ne décroît pas : un seul tick, pas de décélération naturelle cumulée
+	state.vit_z = Fixed.from_float(20.0 / 3.6 / float(Horloge.TICKS_PAR_SECONDE))  
+	var v_avant: int = FixedMath.length_2d(state.vit_x, state.vit_z)  
 
 	var yaw_avant: int = state.yaw
 	CarSim.tick(state, input, track, config, query)
 	var yaw_apres: int = state.yaw
-	# angle_roues est mis à jour par l'étape 2, AVANT l'étape 4 qui calcule
-	# Δψ dans le même tick : c'est donc bien state.angle_roues APRÈS ce tick
-	# (546 unités, un pas de vitesse_braquage depuis 0) qui a servi au calcul
-	# à comparer — pas besoin d'attendre une convergence au maximum.
 	var angle_utilise: int = state.angle_roues
 
 	var dpsi_attendu: int = int(round(Fixed.to_float(v_avant) * float(angle_utilise) / ReglesCommunes.EMPATTEMENT_M))
@@ -395,11 +402,6 @@ func _test_echelle_rotation() -> void:
 	if dpsi_obtenu > FixedMath.HALF_TURN:
 		dpsi_obtenu -= FixedMath.FULL_TURN
 	_check_approx("échelle de rotation : Δψ ≈ v·angle_roues/EMPATTEMENT (pas divisé par 65536 en trop)", dpsi_obtenu, dpsi_attendu, 5)
-	# Seuil volontairement bas (pas 0) : le point est de distinguer une
-	# rotation réelle (quelques unités par tick à 100 Hz) d'un yaw figé par le
-	# bug documenté ci-dessus (résultat ≈ 0), pas de fixer une magnitude
-	# précise — celle-ci dépend de la cadence (v et angle_roues sont tous
-	# deux "par tick").
 	_check("échelle de rotation : le yaw tourne bien de façon significative (pas quasi figé)", Fixed.abs(dpsi_obtenu) > 2)
 
 func _test_braquage_progressif() -> void:
@@ -408,13 +410,13 @@ func _test_braquage_progressif() -> void:
 	var input := InputFrame.new()
 	input.braquage = Fixed.ONE
 
-	var config_lent := CarConfigSuperbike.new()  # Ironside, vitesse_braquage = 110°/s
+	var config_lent := CarConfigSuperbike.new()  
 	config_lent.bake()
 	var state_lent := CarState.new()
 	state_lent.reset(0, 0, 0, 0)
 	CarSim.tick(state_lent, input, track, config_lent, query)
 
-	var config_rapide := CarConfigStreetBike.new()  # Wasp, vitesse_braquage = 400°/s
+	var config_rapide := CarConfigStreetBike.new()  
 	config_rapide.bake()
 	var state_rapide := CarState.new()
 	state_rapide.reset(0, 0, 0, 0)
@@ -425,16 +427,16 @@ func _test_braquage_progressif() -> void:
 	_check_approx("braquage progressif : le pas d'un tick == vitesse_braquage bakée (Wasp)", state_rapide.angle_roues, config_rapide.vitesse_braquage, 2)
 
 func _test_sous_virage() -> void:
-	var config := CarConfigFormula.new()  # Needle, type_glisse = AUCUNE
+	var config := CarConfigFormula.new()  
 	config.bake()
 	var track: Track = _build_wide_track()
 	var query := TrackQueryResult.new()
 	var input := InputFrame.new()
-	input.braquage = Fixed.ONE  # braquage maximal, aucun accel/frein
+	input.braquage = Fixed.ONE  
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
-	state.vit_z = config.vitesse_max  # vitesse élevée : dépasse largement l'adhérence en virage serré
+	state.vit_z = config.vitesse_max 
 
 	var v_avant: int = FixedMath.length_2d(state.vit_x, state.vit_z)
 	for i in range(120):
@@ -445,10 +447,7 @@ func _test_sous_virage() -> void:
 	_check("sous-virage (AUCUNE) : la vitesse chute (perte par scrub)", v_apres < v_avant)
 
 func _test_glisse_raccourcit() -> void:
-	# Le point le plus important : la GLISSE doit tourner le VECTEUR VITESSE
-	# (la trajectoire) plus vite qu'en conduite normale, pas seulement le nez
-	# (yaw) de la voiture — sinon la glisse n'est qu'un effet visuel.
-	var config := CarConfigGt.new()  # Roadster, PIVOT_AVANT
+	var config := CarConfigGt.new() 
 	config.bake()
 	var track: Track = _build_wide_track()
 	var query := TrackQueryResult.new()
@@ -471,10 +470,6 @@ func _test_glisse_raccourcit() -> void:
 	var angle_v_normal_avant: int = FixedMath.atan2(state_normal.vit_x, state_normal.vit_z)
 	var angle_v_glisse_avant: int = FixedMath.atan2(state_glisse.vit_x, state_glisse.vit_z)
 
-	# Une seconde pleine : la glisse met du temps à s'établir
-	# (ReglesCommunes.TAUX_GLISSE_PAR_TICK, ~0,33 s pour saturer), une fenêtre
-	# trop courte la mesurerait encore en train de démarrer et sous-estimerait
-	# son avantage de rotation.
 	for i in range(Horloge.TICKS_PAR_SECONDE):
 		CarSim.tick(state_normal, input_normal, track, config, query)
 		CarSim.tick(state_glisse, input_glisse, track, config, query)
@@ -503,20 +498,20 @@ func _test_glisse_travers() -> void:
 		CarSim.tick(state, input_glisse, track, config, query)
 	_check("glisse (PIVOT_AVANT) : le travers est établi (résidu latéral non nul)", Fixed.abs(_lateral_speed(state)) > 0)
 
-	var input_relache := InputFrame.new()  # tout relâché : plus de braquage, plus de dérapage
+	var input_relache := InputFrame.new() 
 	for i in range(60):
 		CarSim.tick(state, input_relache, track, config, query)
 	_check("glisse (PIVOT_AVANT) : corrigeable — revient vers l'axe au relâchement", Fixed.abs(_lateral_speed(state)) < Fixed.ONE / 10)
 
 func _test_saut_arc() -> void:
-	var config := CarConfigStreetBike.new()  # Wasp, SAUT_ARC
+	var config := CarConfigStreetBike.new()  
 	config.bake()
 	var track: Track = _build_wide_track()
 	var query := TrackQueryResult.new()
 
 	var input := InputFrame.new()
 	input.braquage = Fixed.ONE
-	input.derapage = Fixed.ONE  # front montant dès le premier tick -> déclenche le saut
+	input.derapage = Fixed.ONE 
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
@@ -534,7 +529,7 @@ func _test_saut_arc() -> void:
 	_check_approx("saut (SAUT_ARC) : durée en l'air ≈ saut_duree_ticks", ticks_en_l_air, config.saut_duree_ticks, 2)
 	_check("saut (SAUT_ARC) : de retour au sol après la phase aérienne", state.au_sol)
 
-	for i in range(30):  # phase ARC après l'atterrissage (derapage toujours maintenu)
+	for i in range(30):  
 		CarSim.tick(state, input, track, config, query)
 	_check("saut (SAUT_ARC) : engage bien la phase ARC après atterrissage (glisse_etat == ARC ou déjà relâché)", state.glisse_etat == CarState.GlisseEtat.ARC or state.glisse_etat == CarState.GlisseEtat.LIBRE)
 
@@ -542,18 +537,11 @@ func _test_saut_arc() -> void:
 	_check("saut (SAUT_ARC) : coût en vitesse appliqué (cout_vitesse_saut + drain de l'arc)", v_apres < v_avant)
 
 func _test_permanente() -> void:
-	var config := CarConfigHover.new()  # Halcyon, PERMANENTE
+	var config := CarConfigHover.new() 
 	config.bake()
 	var track: Track = _build_wide_track()
 	var query := TrackQueryResult.new()
 
-	# Ligne droite, accélérateur relâché : decel_naturelle s'applique QUAND
-	# MÊME (c'est sa définition — "décélération accélérateur relâché", très
-	# faible pour Halcyon : 0.5 m/s²). Ce qui ne doit PAS s'y ajouter, c'est
-	# le drain de perte_vitesse_glisse : sans le drain proportionnel à la
-	# SATURATION (pas un drain plat dès que la glisse est "active"),
-	# PERMANENTE — qui n'a ni déclenchement ni sortie — perdrait cette
-	# vitesse supplémentaire même en ligne droite, contre la fiche Halcyon.
 	var input_tout_droit := InputFrame.new()
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
@@ -565,8 +553,6 @@ func _test_permanente() -> void:
 	var perte_attendue: int = Horloge.TICKS_PAR_SECONDE * config.decel_naturelle
 	_check_approx("permanente (Halcyon) : la perte en ligne droite vient seulement de decel_naturelle, pas d'un drain de glisse", v_avant - v_apres, perte_attendue, 10)
 
-	# En virage, le résidu latéral doit persister (dérive continue, pas de
-	# correction complète comme AUCUNE).
 	var input_virage := InputFrame.new()
 	input_virage.braquage = Fixed.ONE
 	var state_virage := CarState.new()
@@ -579,11 +565,9 @@ func _test_permanente() -> void:
 func _test_boost() -> void:
 	var config_a := CarConfigGt.new()
 	config_a.bake()
-	var config_b := CarConfigHover.new()  # decel_naturelle très différent de Roadster
+	var config_b := CarConfigHover.new()  
 	config_b.bake()
 
-	# (a) Poussée le long de la TRAJECTOIRE, pas de l'orientation : vitesse
-	# volontairement non alignée avec yaw=0 (+Z) pour distinguer les deux.
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
 	state.vit_x = Fixed.from_int(3)
@@ -592,19 +576,14 @@ func _test_boost() -> void:
 	CarSim.declencher_boost(state, config_a)
 	var v_apres: int = FixedMath.length_2d(state.vit_x, state.vit_z)
 	_check_approx("boost : poussée absolue +45 km/h le long de la trajectoire", v_apres - v_avant, ReglesCommunes.boost_poussee, 4)
-	# La direction de vit_x/vit_z ne doit pas avoir changé (poussée colinéaire à la vitesse).
 	var ratio_avant: int = Fixed.div(state.vit_x, state.vit_z)
 	_check_approx("boost : ne change pas la direction de la trajectoire", ratio_avant, Fixed.div(Fixed.from_int(3), Fixed.from_int(1)), 50)
 
-	# (b) Décroissance à taux fixe.
 	state.bonus_vitesse = Fixed.from_int(1)
 	for i in range(Horloge.TICKS_PAR_SECONDE):
 		state.bonus_vitesse = Fixed.max(0, state.bonus_vitesse - ReglesCommunes.boost_decroissance)
 	_check_approx("boost : le surplus décroît de 12 km/h après 1 s", Fixed.from_int(1) - state.bonus_vitesse, ReglesCommunes.boost_decroissance * Horloge.TICKS_PAR_SECONDE, 4)
 
-	# (c) Décroissance indépendante de decel_naturelle : deux véhicules très
-	# différents sur ce champ (Roadster 5.0, Halcyon 0.5) doivent perdre
-	# leur surplus de boost à l'identique.
 	var state_a := CarState.new()
 	state_a.reset(0, 0, 0, 0)
 	state_a.bonus_vitesse = Fixed.from_int(1)
@@ -616,18 +595,13 @@ func _test_boost() -> void:
 		state_b.bonus_vitesse = Fixed.max(0, state_b.bonus_vitesse - ReglesCommunes.boost_decroissance)
 	_check("boost : décroissance identique quel que soit decel_naturelle", state_a.bonus_vitesse == state_b.bonus_vitesse)
 
-# ============================================================================
-# Éléments de piste (Lot A) — voir CLAUDE.md, section « Éléments de piste »,
-# et sim/element_effects.gd pour les constantes utilisées ci-dessous.
-# ============================================================================
-
 func _test_track_data_elements() -> void:
 	var data := TrackData.new()
 	data.add_point(Fixed.from_int(-100), 0, Fixed.from_int(-100), Fixed.from_int(50))
 	data.add_point(Fixed.from_int(100), 0, Fixed.from_int(-100), Fixed.from_int(50))
 	data.add_element("boost", "defaut", Fixed.from_int(5), 0, Fixed.from_int(5), 0)
 	data.add_element("id_inconnu", "defaut", Fixed.from_int(1), 0, Fixed.from_int(1), 0)
-	data.elements.append({"type": "mur"})  # dict incomplet (pas de pos_x/pos_y/pos_z/rotation), mais id valide
+	data.elements.append({"type": "mur"})  
 
 	var track: Track = data.to_track()
 	_check("TrackData.to_track: id inconnu ignoré, id valide (même mal formé) conservé", track.element_count() == 2)
@@ -642,10 +616,6 @@ func _test_element_rayons() -> void:
 	var n: int = ElementRoster.Kind.size()
 	_check("ElementEffects: rayons dimensionné sur tout le roster", ElementEffects.rayons.size() == n)
 	_check("ElementEffects: rayons_sq dimensionné pareil", ElementEffects.rayons_sq.size() == n)
-	# Garde-fou anti-traversée : à vitesse_max + boost (Halcyon, 195+45 km/h),
-	# la voiture avance 0,667 m/tick — un rayon non nul doit rester au moins
-	# 3x cette distance (2,0 m), sinon l'échantillonnage ponctuel peut sauter
-	# par-dessus un élément sans jamais le détecter.
 	var plancher: int = Fixed.from_float(2.0)
 	for k in range(n):
 		var r: int = ElementEffects.rayons[k]
@@ -658,38 +628,30 @@ func _test_element_boost() -> void:
 	config.bake()
 	var track: Track = _build_element_track(ElementRoster.Kind.BOOST, 0, 0)
 	var query := TrackQueryResult.new()
-	var input := InputFrame.new()  # braquage/accel/frein à zéro : seule la position compte ici
+	var input := InputFrame.new() 
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
-	# bonus_vitesse ne reflète qu'un SURPLUS au-delà de vitesse_max (voir
-	# declencher_boost) : déjà à vitesse_max avant le pad, sinon la poussée
-	# resterait sous le plafond normal et ne produirait aucun surplus mesurable
-	# (piège rencontré : à l'arrêt, +45 km/h reste bien en dessous de
-	# vitesse_max, bonus_vitesse resterait à 0 même avec le boost déclenché).
 	state.vit_z = config.vitesse_max
 
-	state.pos_x = 0; state.pos_z = 0  # exactement sur le pad
+	state.pos_x = 0; state.pos_z = 0  
 	CarSim.tick(state, input, track, config, query)
 	_check("boost (élément) : déclenché au premier tick dans le rayon", state.bonus_vitesse > 0)
 	var bonus_apres_entree: int = state.bonus_vitesse
 
-	state.pos_x = 0; state.pos_z = 0  # forcé à rester sur le pad malgré le déplacement
+	state.pos_x = 0; state.pos_z = 0  
 	CarSim.tick(state, input, track, config, query)
-	# bonus_vitesse décroît un peu chaque tick (ReglesCommunes.boost_decroissance)
-	# mais ne doit jamais RÉAUGMENTER en restant dans le pad (pas de retrigger
-	# tant qu'on n'en est pas ressorti).
 	_check("boost (élément) : pas de nouveau déclenchement en restant sur le pad", state.bonus_vitesse <= bonus_apres_entree)
 
-	state.pos_x = Fixed.from_int(50); state.pos_z = 0  # sort du rayon (3 m)
+	state.pos_x = Fixed.from_int(50); state.pos_z = 0 
 	CarSim.tick(state, input, track, config, query)
-	state.pos_x = 0; state.pos_z = 0  # revient exactement sur le pad
+	state.pos_x = 0; state.pos_z = 0  
 	var bonus_avant_retour: int = state.bonus_vitesse
 	CarSim.tick(state, input, track, config, query)
 	_check("boost (élément) : redéclenché après sortie puis rentrée sur le pad", state.bonus_vitesse > bonus_avant_retour)
 
 func _test_element_rampe() -> void:
-	var config := CarConfigGt.new()  # Roadster : saut_gravite == 0 (aucun saut configuré) — c'est le point du test
+	var config := CarConfigGt.new() 
 	config.bake()
 	_check("rampe (élément) : config non-Wasp a bien saut_gravite=0 (sinon le test ne prouve rien)", config.saut_gravite == 0)
 
@@ -714,7 +676,7 @@ func _test_element_rampe() -> void:
 	_check("rampe (élément) : de retour au sol après la phase aérienne", state.au_sol)
 
 func _test_element_ralentit() -> void:
-	var config := CarConfigFormula.new()  # Needle : courbe d'accel linéaire (accel_basse == accel_haute), simplifie la mesure
+	var config := CarConfigFormula.new()  
 	config.bake()
 	var track: Track = _build_element_track(ElementRoster.Kind.ROUTE_RALENTIT, 0, 0)
 	var query := TrackQueryResult.new()
@@ -723,25 +685,25 @@ func _test_element_ralentit() -> void:
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
-	state.vit_z = config.vitesse_max  # entre dans la zone déjà à vitesse max
+	state.vit_z = config.vitesse_max  
 
 	CarSim.tick(state, input, track, config, query)
 	_check("route_ralentit : pas un mur — la vitesse ne chute pas d'un coup au plafond dès le premier tick", FixedMath.length_2d(state.vit_x, state.vit_z) > ElementEffects.ralentit_plafond)
 
 	for i in range(1000):
-		state.pos_x = 0; state.pos_z = 0  # reste artificiellement dans la zone (rayon 6 m) malgré le déplacement
+		state.pos_x = 0; state.pos_z = 0 
 		CarSim.tick(state, input, track, config, query)
 	var v_final: int = FixedMath.length_2d(state.vit_x, state.vit_z)
 	_check_approx("route_ralentit : converge vers le plafond de zone après un moment plein régime", v_final, ElementEffects.ralentit_plafond, Fixed.from_float(0.03))
 
 	var state_hors := CarState.new()
-	state_hors.reset(Fixed.from_int(1000), 0, 0, 0)  # loin de l'élément (rayon 6 m)
+	state_hors.reset(Fixed.from_int(1000), 0, 0, 0) 
 	state_hors.vit_z = config.vitesse_max
 	CarSim.tick(state_hors, input, track, config, query)
 	_check("route_ralentit : hors zone, la vitesse max n'est pas plafonnée", FixedMath.length_2d(state_hors.vit_x, state_hors.vit_z) > ElementEffects.ralentit_plafond)
 
 func _test_element_degrade_controles() -> void:
-	var config := CarConfigStreetBike.new()  # Wasp : vitesse_braquage rapide (400°/s)
+	var config := CarConfigStreetBike.new() 
 	config.bake()
 	var track: Track = _build_element_track(ElementRoster.Kind.ROUTE_DEGRADE_CONTROLES, 0, 0)
 	var query := TrackQueryResult.new()
@@ -753,15 +715,8 @@ func _test_element_degrade_controles() -> void:
 	var state_hors := CarState.new()
 	state_hors.reset(Fixed.from_int(1000), 0, 0, 0)
 
-	# Un seul tick ne suffit pas à distinguer les deux : même à pleine
-	# réduction, la cible reste souvent au-delà de ce qu'un seul tick de
-	# vitesse_braquage peut parcourir (angle_roues plafonne alors au MÊME
-	# taux de rotation des deux côtés, masquant l'effet — piège rencontré).
-	# Assez de ticks pour que angle_roues converge à son régime permanent
-	# des deux côtés (vitesse_braquage_deg_s de Wasp = 400°/s, angle_braquage_max
-	# = 36° -> ~9 ticks pour atteindre le plein braquage ; marge généreuse).
 	for i in range(30):
-		state_zone.pos_x = 0; state_zone.pos_z = 0  # reste artificiellement dans la zone (rayon 6 m)
+		state_zone.pos_x = 0; state_zone.pos_z = 0  
 		CarSim.tick(state_zone, input, track, config, query)
 		CarSim.tick(state_hors, input, track, config, query)
 
@@ -769,7 +724,7 @@ func _test_element_degrade_controles() -> void:
 	_check_approx("route_degrade_controles : réduction ≈ DEGRADE_AUTORITE", state_zone.angle_roues, Fixed.mul(state_hors.angle_roues, ElementEffects.degrade_autorite), 4)
 
 func _test_element_aimantee() -> void:
-	var config := CarConfigHover.new()  # Halcyon : adhérence la plus faible (12,6), effet du bonus additif le plus visible
+	var config := CarConfigHover.new()  
 	config.bake()
 	var track_aimante: Track = _build_element_track(ElementRoster.Kind.ROUTE_AIMANTEE, 0, 0)
 	var track_normal: Track = _build_wide_track()
@@ -789,7 +744,7 @@ func _test_element_aimantee() -> void:
 	var angle_avant_normal: int = FixedMath.atan2(state_normal.vit_x, state_normal.vit_z)
 
 	for i in range(Horloge.TICKS_PAR_SECONDE):
-		state_aimante.pos_x = 0; state_aimante.pos_z = 0  # reste artificiellement dans la zone (rayon 6 m)
+		state_aimante.pos_x = 0; state_aimante.pos_z = 0  
 		CarSim.tick(state_aimante, input, track_aimante, config, query)
 		CarSim.tick(state_normal, input, track_normal, config, query)
 
@@ -818,7 +773,7 @@ func _test_element_obstacle_ralentit() -> void:
 	_check("obstacle_ralentit : ne fait jamais reculer", state.vit_z >= 0)
 
 	var v_apres_premier: int = v_apres
-	state.pos_x = 0; state.pos_z = 0  # forcé à rester dans le rayon
+	state.pos_x = 0; state.pos_z = 0 
 	CarSim.tick(state, input, track, config, query)
 	_check("obstacle_ralentit : pas de second impact en restant dans le rayon", FixedMath.length_2d(state.vit_x, state.vit_z) >= v_apres_premier - Fixed.from_float(0.02))
 
@@ -828,12 +783,12 @@ func _test_element_obstacle_mortel() -> void:
 		config.bake()
 		var track: Track = _build_element_track(kind, 0, 0)
 		var query := TrackQueryResult.new()
-		var input := InputFrame.new()  # tout à zéro : isole l'effet de l'impact, sans accélérateur qui compenserait dans le même tick
+		var input := InputFrame.new()  
 
 		var state := CarState.new()
 		state.reset(0, 0, 0, 0)
 		state.vit_z = config.vitesse_max
-		state.bonus_vitesse = Fixed.from_float(1.0)  # surplus de boost simulé, doit être annulé par l'impact
+		state.bonus_vitesse = Fixed.from_float(1.0)  
 
 		CarSim.tick(state, input, track, config, query)
 		_check("mortel/vide (kind %d) : vitesse clampée à 0" % kind, state.vit_x == 0 and state.vit_z == 0)
@@ -844,15 +799,10 @@ func _test_element_obstacle_mortel() -> void:
 		input_braquage.braquage = Fixed.ONE
 
 		var state_verrou := CarState.new()
-		state_verrou.reset(Fixed.from_int(1000), 0, 0, 0)  # hors du rayon de l'élément : seul le verrou compte ici
+		state_verrou.reset(Fixed.from_int(1000), 0, 0, 0)  
 		state_verrou.controle_perdu_ticks = ElementEffects.mortel_controle_perdu_ticks
 		var state_libre := CarState.new()
 		state_libre.reset(Fixed.from_int(1000), 0, 0, 0)
-		# Plusieurs ticks pour laisser angle_roues converger des deux côtés
-		# (un seul tick peut plafonner au même taux de vitesse_braquage,
-		# quelle que soit la réduction — même piège que route_degrade_
-		# controles ci-dessus). controle_perdu_ticks (150 pour 1,5 s) laisse
-		# largement le temps.
 		for i in range(30):
 			CarSim.tick(state_verrou, input_braquage, track, config, query)
 			CarSim.tick(state_libre, input_braquage, track, config, query)
@@ -924,12 +874,12 @@ func _test_element_reset() -> void:
 	var input := InputFrame.new()
 
 	var state := CarState.new()
-	state.reset(0, 0, 0, 0)  # au centre du pad
-	state.vit_z = config.vitesse_max  # déjà à vitesse max : sans ça bonus_vitesse resterait à 0 (voir _test_element_boost)
+	state.reset(0, 0, 0, 0)  
+	state.vit_z = config.vitesse_max  
 	CarSim.tick(state, input, track, config, query)
 	_check("reset (éléments) : boost déclenché une première fois", state.bonus_vitesse > 0)
 
-	state.reset(0, 0, 0, 0)  # redémarrage, toujours au centre du pad
+	state.reset(0, 0, 0, 0)  
 	state.vit_z = config.vitesse_max
 	_check("reset (éléments) : elements_dans réarmé", state.elements_dans[0] == 0)
 	CarSim.tick(state, input, track, config, query)
@@ -946,9 +896,6 @@ func _test_element_reset() -> void:
 	_check("reset (éléments) : passage à une piste à 2 éléments redimensionne elements_dans", state.elements_dans.size() == 2)
 
 func _test_bake_unites() -> void:
-	# Garde anti-régression contre le piège /TICKS_PAR_SECONDE_CARRE vs
-	# /TICKS_PAR_SECONDE documenté dans CLAUDE.md — quelques valeurs bakées
-	# comparées à leur calcul à la main.
 	var config := CarConfigGt.new()
 	config.bake()
 	_check_approx("bake: adherence_laterale_ms2 -> /TICKS_PAR_SECONDE_CARRE (accélération)", config.adherence, Fixed.from_float(25.2 / float(Horloge.TICKS_PAR_SECONDE_CARRE)), 2)
@@ -963,11 +910,6 @@ func _test_horloge() -> void:
 	_check("time_format: format_ms gère minutes et secondes", TimeFormat.format_ms(75123) == "1:15.123")
 	_check("time_format: format_ticks reste cohérent avec format_ms", TimeFormat.format_ticks(1) == TimeFormat.format_ms(Horloge.MS_PAR_TICK))
 
-# ============================================================================
-# Système de fantôme (replay/input_crans.gd, replay/replay_data.gd,
-# replay/replay_store.gd) — voir CLAUDE.md, vocabulaire "replay"/"fantôme".
-# ============================================================================
-
 func _test_input_crans() -> void:
 	_check("InputCrans: uni_to_cran(0.0) == 0", InputCrans.uni_to_cran(0.0) == 0)
 	_check("InputCrans: uni_to_cran(1.0) == QUANT_UNI", InputCrans.uni_to_cran(1.0) == InputCrans.QUANT_UNI)
@@ -981,9 +923,6 @@ func _test_input_crans() -> void:
 	_check_approx("InputCrans: cran_to_fixed_bi(QUANT_BI) == Fixed.ONE", InputCrans.cran_to_fixed_bi(InputCrans.QUANT_BI), Fixed.ONE, 1)
 	_check_approx("InputCrans: cran_to_fixed_bi(-QUANT_BI) == -Fixed.ONE", InputCrans.cran_to_fixed_bi(-InputCrans.QUANT_BI), -Fixed.ONE, 1)
 
-	# Aller-retour de l'encodage en octet non signé sur TOUTE la plage — la
-	# classe de bug (off-by-one/signe) la plus souvent documentée dans ce
-	# projet (voir CLAUDE.md).
 	var tous_dans_la_plage: bool = true
 	var aller_retour_ok: bool = true
 	for cran in range(-InputCrans.QUANT_BI, InputCrans.QUANT_BI + 1):
@@ -995,11 +934,6 @@ func _test_input_crans() -> void:
 	_check("InputCrans: bi_to_octet reste dans [0, 255] sur toute la plage [-127, 127]", tous_dans_la_plage)
 	_check("InputCrans: octet_to_bi(bi_to_octet(c)) == c sur toute la plage", aller_retour_ok)
 
-# Comme _make_input_sequence, mais en crans (voir replay/input_crans.gd) —
-# pour les tests de replay, qui doivent exercer le même chemin de
-# conversion cran -> Fixed que le jeu réel (pas directement des InputFrame
-# déjà en Q16.16). Renvoie [accel, frein, braquage, derapage], 4
-# PackedByteArray (braquage déjà encodé en octet non signé).
 func _make_cran_sequence(n: int) -> Array:
 	var accel: PackedByteArray = PackedByteArray()
 	var frein: PackedByteArray = PackedByteArray()
@@ -1027,8 +961,6 @@ func _run_world_depuis_crans(accel: PackedByteArray, frein: PackedByteArray, bra
 		world.tick(input)
 	return world
 
-# La preuve centrale du système de fantôme : enregistrer un run puis le
-# rejouer depuis les crans stockés doit être bit-exact.
 func _test_replay_round_trip() -> void:
 	var crans: Array = _make_cran_sequence(2000)
 	var accel: PackedByteArray = crans[0]
@@ -1036,10 +968,8 @@ func _test_replay_round_trip() -> void:
 	var braquage: PackedByteArray = crans[2]
 	var derapage: PackedByteArray = crans[3]
 
-	# Monde A : "enregistré" directement depuis les crans (comme le joueur).
 	var world_a: World = _run_world_depuis_crans(accel, frein, braquage, derapage)
 
-	# Encode dans un ReplayData, comme le ferait main.gd à l'arrivée.
 	var replay := ReplayData.new()
 	replay.track_uid = "test"
 	replay.vehicle_id = "gt"
@@ -1051,9 +981,6 @@ func _test_replay_round_trip() -> void:
 	replay.derapage_crans = derapage
 	_check("replay round-trip: le replay encodé est cohérent (est_coherent)", replay.est_coherent())
 
-	# Monde B : décodé depuis le ReplayData via remplir_input(), sur un
-	# InputFrame RÉUTILISÉ — exactement le chemin emprunté par le fantôme
-	# dans main.gd.
 	var world_b: World = _build_test_world()
 	var input_b := InputFrame.new()
 	for i in range(replay.tick_count()):
@@ -1070,7 +997,7 @@ func _test_replay_serialisation() -> void:
 	replay.vehicle_id = "hover"
 	replay.finish_ms = 98765
 	replay.date = "test"
-	replay.hash_final = -1234567890123456789  # int64 signé pleine plage : vérifie l'absence de troncature
+	replay.hash_final = -1234567890123456789 
 	replay.start_tick = 3
 	replay.accel_crans = crans[0]
 	replay.frein_crans = crans[1]
@@ -1094,13 +1021,9 @@ func _test_replay_serialisation() -> void:
 	if FileAccess.file_exists(path + ".uid"):
 		DirAccess.remove_absolute(path + ".uid")
 
-# Verrou contre un futur état mutable partagé dans sim/ (le fantôme et le
-# joueur tickent chacun leur propre World en parallèle dans main.gd) :
-# deux World entrelacés sur le même Track partagé doivent chacun retrouver
-# EXACTEMENT le hash qu'ils obtiendraient joués seuls.
 func _test_deux_mondes_isoles() -> void:
 	var seq_a: Array[InputFrame] = _make_input_sequence(1500)
-	var seq_b: Array[InputFrame] = _make_input_sequence(1200)  # longueur différente exprès
+	var seq_b: Array[InputFrame] = _make_input_sequence(1200)  
 
 	var ref_a: int = _run_sequence(seq_a)
 	var world_ref_b: World = _build_test_world()
@@ -1125,11 +1048,6 @@ func _test_deux_mondes_isoles() -> void:
 	_check("deux mondes isolés: le monde A entrelacé retrouve le hash de la séquence A jouée seule", world_a.state_hash() == ref_a)
 	_check("deux mondes isolés: le monde B entrelacé retrouve le hash de la séquence B jouée seule", world_b.state_hash() == ref_b)
 
-# Fichier de replay minimal réellement écrit sur user://replays (comme
-# _test_replay_serialisation()) : GhostResolver.best_entry()/resolve()
-# passent par ReplayStore.exists(), donc un fichier "orphelin" doit vraiment
-# être absent du disque pour être ignoré, pas juste absent d'un tableau en
-# mémoire. Contenu du replay lui-même sans importance ici (jamais rejoué).
 func _make_dummy_replay(track_uid: String, vehicle_id: String, finish_ms: int) -> String:
 	var replay := ReplayData.new()
 	replay.track_uid = track_uid
@@ -1143,10 +1061,6 @@ func _test_ghost_resolver() -> void:
 	var file_rapide: String = _make_dummy_replay(track_uid, "gt", 4000)
 	var file_formula: String = _make_dummy_replay(track_uid, "formula", 6000)
 
-	# `runs` volontairement PAS trié par temps, et avec un orphelin (jamais
-	# sauvegardé sur disque) plus rapide que tout le reste : si le résolveur
-	# se contentait du premier match ou faisait confiance à l'ordre de
-	# l'appelant, ce test le prendrait en défaut.
 	var runs: Array[Dictionary] = [
 		{"vehicule": "gt", "ms": 5000, "replay": file_lent},
 		{"vehicule": "gt", "ms": 4000, "replay": file_rapide},
@@ -1164,9 +1078,6 @@ func _test_ghost_resolver() -> void:
 	_check("GhostResolver PERSO(''): change de résultat si vehicule_courant change",
 		GhostResolver.resolve(sel_perso_auto, runs, "formula", []) == file_formula)
 
-	# Battre son record change le fichier résolu SANS toucher à la sélection
-	# — la preuve directe du remplacement automatique d'une tentative à
-	# l'autre (voir main.gd::_resoudre_fantome()).
 	var file_record: String = _make_dummy_replay(track_uid, "gt", 3000)
 	var runs_apres_record: Array[Dictionary] = runs.duplicate()
 	runs_apres_record.append({"vehicule": "gt", "ms": 3000, "replay": file_record})
@@ -1174,9 +1085,6 @@ func _test_ghost_resolver() -> void:
 		GhostResolver.resolve(sel_perso_gt, runs_apres_record, "", []) == file_record
 		and int(sel_perso_gt["source"]) == GhostResolver.Source.PERSO)
 
-	# MONDIAL dégrade vers PERSO quand le temps perso est plus rapide (on est
-	# devenu le record), et retombe sur PERSO quand aucun WR n'est fourni
-	# (backend absent, voir CLAUDE.md étape 6).
 	var sel_mondial: Dictionary = {"source": GhostResolver.Source.MONDIAL, "vehicule": "gt", "fichier": ""}
 	_check("GhostResolver MONDIAL: aucun WR fourni -> retombe sur PERSO",
 		GhostResolver.resolve(sel_mondial, runs, "", []) == file_rapide)
@@ -1194,11 +1102,6 @@ func _test_ghost_resolver() -> void:
 	var sel_aucun: Dictionary = {"source": GhostResolver.Source.AUCUN}
 	_check("GhostResolver AUCUN: résout vers \"\"", GhostResolver.resolve(sel_aucun, runs, "", []) == "")
 
-	# Traduction persistée <-> enum (ui/ghost_selection.gd) : un int d'enum
-	# écrit tel quel se corromprait au moindre réordonnancement futur de
-	# Source, d'où le passage par une chaîne — aller-retour sur les 4
-	# valeurs, plus repli sur AUCUN pour une chaîne inconnue (fichier .cfg
-	# corrompu, même tolérance que le reste du projet).
 	var sources: Array[int] = [GhostResolver.Source.AUCUN, GhostResolver.Source.PERSO, GhostResolver.Source.MONDIAL, GhostResolver.Source.MANUEL]
 	for source in sources:
 		_check("GhostResolver source_name/source_from_name: aller-retour pour %d" % source,
@@ -1210,9 +1113,6 @@ func _test_ghost_resolver() -> void:
 	ReplayStore.delete_file(file_rapide)
 	ReplayStore.delete_file(file_formula)
 	ReplayStore.delete_file(file_record)
-
-# --- Regroupement des pistes (map/track_grouping.gd) ---
-# Statique et pur, comme GhostResolver : testable ici sans autoload.
 
 func _test_track_grouping_alpha() -> void:
 	var entries: Array[Dictionary] = [
@@ -1239,14 +1139,13 @@ func _test_track_grouping_alpha() -> void:
 		var uids_autre: Array = section_autre.map(func(e: Dictionary) -> String: return String(e["uid"]))
 		_check("grouping alpha: vide et symbole -> Autre", uids_autre.has("5") and uids_autre.has("6"))
 
-	# Bornes de _alpha_label() directement, sans dépendre de sections_alpha().
 	_check("grouping alpha: borne chiffre '9'", TrackGrouping._alpha_label("9eme ciel") == "0-9")
 	_check("grouping alpha: borne lettre 'A'", TrackGrouping._alpha_label("A") == "A")
 	_check("grouping alpha: borne lettre 'Z'", TrackGrouping._alpha_label("z") == "Z")
 	_check("grouping alpha: espaces seuls -> Autre", TrackGrouping._alpha_label("   ") == "Autre")
 
 func _test_track_grouping_date_ajout() -> void:
-	var jour1: int = 1700000000  # référence fixe, jour arbitraire
+	var jour1: int = 1700000000  
 	var jour2: int = jour1 + 2 * 86400
 	var str_jour1: String = Time.get_datetime_string_from_unix_time(jour1)
 	var str_jour1_plus_tard: String = Time.get_datetime_string_from_unix_time(jour1 + 3600)
@@ -1275,7 +1174,7 @@ func _test_track_grouping_duree() -> void:
 	}
 	var entries: Array[Dictionary] = []
 	for uid in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]:
-		entries.append({"uid": uid})  # "k" absent de meilleurs_temps -> jamais joué
+		entries.append({"uid": uid})  
 
 	var sections: Array[Dictionary] = TrackGrouping.sections_duree(entries, meilleurs_temps)
 	var attendu: Array[Array] = [
@@ -1290,7 +1189,6 @@ func _test_track_grouping_duree() -> void:
 				ok = false
 		_check("grouping durée: tranches croissantes, ordre ascendant dans chacune, inconnue en dernier", ok)
 
-	# Bornes exactes de _duree_label().
 	_check("grouping durée: borne 29999ms", TrackGrouping._duree_label(29999) == "Moins de 30 secondes")
 	_check("grouping durée: borne 30000ms", TrackGrouping._duree_label(30000) == "30 secondes à 1 minute")
 	_check("grouping durée: borne 300000ms", TrackGrouping._duree_label(300000) == "Plus de 5 minutes")
@@ -1299,13 +1197,13 @@ func _test_track_grouping_duree() -> void:
 func _test_track_grouping_recemment_jouees() -> void:
 	var now: float = Time.get_unix_time_from_system()
 	var derniers_joues: Dictionary = {
-		"a": now - 3600.0,           # il y a 1h -> Aujourd'hui
-		"b": now - 3.0 * 86400.0,    # il y a 3j -> Cette semaine
-		"c": now - 15.0 * 86400.0,   # il y a 15j -> Ce mois-ci
-		"d": now - 40.0 * 86400.0,   # il y a 40j -> plus d'un mois
+		"a": now - 3600.0,         
+		"b": now - 3.0 * 86400.0,   
+		"c": now - 15.0 * 86400.0, 
+		"d": now - 40.0 * 86400.0,   
 	}
 	var entries: Array[Dictionary] = [
-		{"uid": "a"}, {"uid": "b"}, {"uid": "c"}, {"uid": "d"}, {"uid": "e"},  # "e" jamais joué
+		{"uid": "a"}, {"uid": "b"}, {"uid": "c"}, {"uid": "d"}, {"uid": "e"}, 
 	]
 	var sections: Array[Dictionary] = TrackGrouping.sections_recemment_jouees(entries, derniers_joues)
 	var attendu: Array[String] = ["a", "b", "c", "d", "e"]
@@ -1318,8 +1216,6 @@ func _test_track_grouping_recemment_jouees() -> void:
 				ok = false
 		_check("grouping récence: une piste par section dans le bon ordre", ok)
 
-	# Bornes exactes de _recence_label() (intervalles ouverts à droite : la
-	# borne elle-même appartient à la tranche SUIVANTE, pas celle testée).
 	_check("grouping récence: borne 1 jour pile -> Cette semaine, pas Aujourd'hui",
 		TrackGrouping._recence_label(now - 86400.0, now) == "Cette semaine")
 	_check("grouping récence: borne 7 jours pile -> Ce mois-ci",
@@ -1356,6 +1252,8 @@ func _initialize() -> void:
 	_test_replay_determinism()
 	_test_race_state()
 	_test_race_state_ouverte()
+	_test_progress_validation()
+	_test_collision_gabarit()
 	_test_track_data_start_transform()
 	_test_courbe_accel()
 	_test_echelle_rotation()

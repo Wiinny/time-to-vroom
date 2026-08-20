@@ -1,26 +1,3 @@
-# Circuit fermé codé en dur pour l'étape 1 : ligne droite de départ, deux
-# virages larges, une chicane resserrée, un long retour au sud (bien en
-# dessous du reste du circuit) et un virage de fermeture qui referme
-# exactement sur le point de départ (même position, même cap) — boucle
-# simple, aucun croisement avec elle-même. Échafaudage assumé — sera
-# remplacé par le chargeur de piste à l'étape 2 (voir CLAUDE.md).
-#
-# Piège rencontré : Track.closest_point cherche le segment le plus proche
-# sur TOUTE la boucle (pas seulement le long du tracé) — si deux segments
-# se croisent ou passent trop près l'un de l'autre, la recherche peut
-# accrocher le mauvais segment et la voiture se fait éjecter/téléporter au
-# contact d'une barrière. Une première version de ce tracé refermait la
-# boucle par une longue diagonale (~166 m) qui traversait en plein la
-# ligne droite après le virage n°1 — tout véhicule y perdait le contrôle
-# près de ce croisement. Toute future modification de ce tracé doit
-# vérifier qu'aucun segment ne croise ni ne longe un autre segment à moins
-# d'une largeur de piste (HW_NORMAL/HW_HAIRPIN de marge de chaque côté).
-#
-# Ce fichier ne tourne qu'une fois au chargement, pas par tick : il peut
-# utiliser des Array/Dictionary sans réserve. En revanche la géométrie
-# influence directement les résultats de run (bords de piste), donc tout
-# passe quand même par Fixed/FixedMath — jamais par sin()/cos() flottants,
-# qui pourraient varier d'une machine à l'autre.
 class_name TrackHardcoded
 
 const HW_NORMAL: int = 5

@@ -7,6 +7,7 @@
 extends Control
 
 const PREVIEW_SPIN_SPEED: float = 0.35  # rad/s, tourne-disque cosmétique
+const BACKGROUND: Texture2D = preload("res://assets/ui/main_menu_background.png")
 
 var _menu_root: VBoxContainer
 var _preview_car: CarView
@@ -23,10 +24,21 @@ func _process(delta: float) -> void:
 		_preview_car.rotation.y += PREVIEW_SPIN_SPEED * delta
 
 func _build_ui() -> void:
-	var bg := ColorRect.new()
-	bg.color = Color(0.5, 0.7, 0.9, 1.0)
+	var bg := TextureRect.new()
+	bg.texture = BACKGROUND
+	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
+
+	# Léger voile commun pour garder le véhicule et les boutons lisibles sur
+	# toutes les zones de la photo, sans masquer le garage demandé.
+	var veil := ColorRect.new()
+	veil.color = Color(0.02, 0.025, 0.035, 0.24)
+	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	veil.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(veil)
 
 	var layout := HBoxContainer.new()
 	layout.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -48,20 +60,23 @@ func _build_preview(layout: HBoxContainer) -> void:
 	var viewport := SubViewport.new()
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	viewport.own_world_3d = true  # isole ce monde 3D miniature de tout autre SubViewport
+	viewport.transparent_bg = true
 	container.add_child(viewport)
 
 	var world_env := WorldEnvironment.new()
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color(0.15, 0.16, 0.2)
+	environment.background_color = Color(0.0, 0.0, 0.0, 0.0)
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(1, 1, 1)
-	environment.ambient_light_energy = 0.7
+	environment.ambient_light_color = Color(1.0, 0.78, 0.58)
+	environment.ambient_light_energy = 1.15
 	world_env.environment = environment
 	viewport.add_child(world_env)
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-45.0, -30.0, 0.0)
+	sun.light_color = Color(1.0, 0.82, 0.65)
+	sun.light_energy = 1.4
 	viewport.add_child(sun)
 
 	var camera := Camera3D.new()
@@ -69,8 +84,8 @@ func _build_preview(layout: HBoxContainer) -> void:
 	# look_at() lit global_transform : appelé avant add_child() sur un nœud
 	# orphelin, il n'a aucun effet (la caméra garde son orientation par
 	# défaut, -Z) — toujours ajouter au SceneTree avant de l'appeler.
-	camera.position = Vector3(3.5, 2.2, 3.5)
-	camera.look_at(Vector3.ZERO, Vector3.UP)
+	camera.position = Vector3(4.8, 2.25, 5.8)
+	camera.look_at(Vector3(0.0, 0.65, 0.0), Vector3.UP)
 
 	_preview_car = CarView.new()
 	viewport.add_child(_preview_car)
@@ -86,10 +101,36 @@ func _build_menu(layout: HBoxContainer) -> void:
 	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	layout.add_child(center)
 
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(390.0, 0.0)
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.025, 0.03, 0.04, 0.88)
+	panel_style.border_color = Color(0.92, 0.48, 0.16, 0.75)
+	panel_style.set_border_width_all(1)
+	panel_style.set_corner_radius_all(12)
+	panel_style.content_margin_left = 34.0
+	panel_style.content_margin_right = 34.0
+	panel_style.content_margin_top = 30.0
+	panel_style.content_margin_bottom = 30.0
+	panel.add_theme_stylebox_override("panel", panel_style)
+	center.add_child(panel)
+
 	_menu_root = VBoxContainer.new()
 	_menu_root.custom_minimum_size = Vector2(320.0, 0.0)
 	_menu_root.add_theme_constant_override("separation", 6)
-	center.add_child(_menu_root)
+	panel.add_child(_menu_root)
+
+	var title := Label.new()
+	title.text = "TIME TO VROOM"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color(1.0, 0.67, 0.30))
+	_menu_root.add_child(title)
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size.y = 14.0
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_menu_root.add_child(spacer)
 
 	_play_button = _add_menu_button(_menu_root, "Jouer", _on_play_pressed)
 	_add_disabled_button(_menu_root, "Multijoueur")

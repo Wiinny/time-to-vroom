@@ -1,24 +1,22 @@
-# Détection de franchissement de la ligne d'arrivée. Déterministe (Q16.16
-# uniquement, cf. core/fixed.gd) : la porte est calculée une fois depuis un
-# segment de la piste — le PREMIER (point 0 -> point 1) si track.est_ferme
-# (circuit : départ et arrivée confondus), le DERNIER si la piste est point à
-# point (départ et arrivée physiquement distincts, voir map/track.gd) — puis
-# chaque tick projette la position avant/après sur sa tangente pour détecter
-# un passage.
-#
-# Un seul objet, créé une fois par res://sim/world.gd, muté en place — jamais
-# recréé par tick.
 class_name RaceState
 
-const DEPARTED_THRESHOLD: int = 3 << 16  # Fixed.from_int(3), 3 m
-const TIME_LIMIT_TICKS: int = Horloge.TICKS_PAR_SECONDE * 60 * 30  # 30 minutes pile
+const DEPARTED_THRESHOLD: int = 3 << 16  
+const TIME_LIMIT_TICKS: int = Horloge.TICKS_PAR_SECONDE * 60 * 30  
 const TIME_LIMIT_MS: int = TIME_LIMIT_TICKS * Horloge.MS_PAR_TICK
+const VALIDATION_SPACING_M: int = 20
+const MIN_VALIDATION_SECTORS: int = 8
+const MAX_VALIDATION_SECTORS: int = 64
+const MAX_PROGRESS_STEP_M: int = 5
+static var MAX_PROGRESS_STEP: int = Fixed.from_int(MAX_PROGRESS_STEP_M)
 
 var finished: bool = false
-var finish_ms: int = 0  # temps de course en ms, interpolé au sous-tick (relatif au premier input)
+var finish_ms: int = 0  
 var timed_out: bool = false
-var started: bool = false  # true dès le premier input du joueur
-var current_elapsed: int = 0  # temps de course courant, 0 tant que started == false
+var started: bool = false 
+var current_elapsed: int = 0  
+var run_valid: bool = true
+var validation_zone_count: int = 0
+var validated_zone_count: int = 0
 
 var _p0_x: int = 0
 var _p0_z: int = 0
@@ -26,12 +24,21 @@ var _tangent_x: int = 0
 var _tangent_z: int = Fixed.ONE
 var _half_width: int = 0
 var _departed: bool = false
-var _needs_departure: bool = true  # voir setup()/reset()
+var _needs_departure: bool = true 
 var _start_tick: int = 0
+var _track: Track
+var _validation_enabled: bool = true
+var _validation_gates: PackedInt64Array = PackedInt64Array()
+var _race_length: int = 0
+var _last_progress: int = 0
+var _unwrapped_progress: int = 0
+var _has_progress: bool = false
+var _fallback_query: TrackQueryResult = TrackQueryResult.new()
 
-# Calcule la géométrie de la porte d'arrivée — même calcul que
-# Track.closest_point() pour le segment concerné (voir map/track.gd).
-func setup(track: Track) -> void:
+func setup(track: Track, enable_progress_validation: bool = true) -> void:
+	_track = track
+	_validation_enabled = enable_progress_validation
+	track.prepare_progress(true)
 	var n: int = track.point_count()
 	var g: int = 0 if track.est_ferme else max(0, n - 2)
 	_p0_x = track.point_x[g]
@@ -42,16 +49,21 @@ func setup(track: Track) -> void:
 	_tangent_x = Fixed.div(dx, seg_len)
 	_tangent_z = Fixed.div(dz, seg_len)
 	_half_width = track.half_width[g]
-	# Sur un circuit, la porte EST le point d'apparition : sans attendre un
-	# éloignement de DEPARTED_THRESHOLD, le tick 0 déclencherait une arrivée
-	# immédiate (le joueur apparaît littéralement sur la ligne). Sur une piste
-	# point à point, départ et arrivée sont physiquement éloignés — exiger cet
-	# éloignement produirait l'effet inverse : la voiture reste tout le run du
-	# côté "avant" négatif de cette porte-là (elle ne s'en approche qu'à la
-	# toute fin), donc _departed ne passerait jamais à true avant le
-	# franchissement lui-même, et aucune arrivée ne pourrait jamais se
-	# déclencher.
 	_needs_departure = track.est_ferme
+	_race_length = track.total_length() if track.est_ferme else track.segment_start(g)
+	_build_validation_gates()
+
+func _build_validation_gates() -> void:
+	_validation_gates.clear()
+	if not _validation_enabled or _race_length <= 0:
+		validation_zone_count = 0
+		return
+	var spacing: int = Fixed.from_int(VALIDATION_SPACING_M)
+	var sectors: int = (_race_length + spacing - 1) / spacing
+	sectors = clampi(sectors, MIN_VALIDATION_SECTORS, MAX_VALIDATION_SECTORS)
+	for i in range(1, sectors):
+		_validation_gates.push_back(_race_length * i / sectors)
+	validation_zone_count = _validation_gates.size()
 
 func reset() -> void:
 	finished = false
@@ -59,16 +71,16 @@ func reset() -> void:
 	timed_out = false
 	started = false
 	current_elapsed = 0
+	run_valid = true
+	validated_zone_count = 0
 	_departed = not _needs_departure
 	_start_tick = 0
+	_last_progress = 0
+	_unwrapped_progress = 0
+	_has_progress = false
+	_fallback_query.reset()
 
-# Appelée une fois par tick de simulation, avec la position avant/après ce
-# tick et si l'input de ce tick est actif (accélérateur, frein ou braquage —
-# voir sim/world.gd). Le chrono ne démarre qu'au premier input actif : tant
-# que le joueur n'a rien pressé, cette fonction ne fait rien (current_elapsed
-# reste à 0). Ne fait rien non plus une fois la course terminée ou le temps
-# écoulé (l'un et l'autre ne redeviennent false qu'via reset()).
-func tick(prev_x: int, prev_z: int, cur_x: int, cur_z: int, tick_number: int, input_active: bool) -> void:
+func tick(prev_x: int, prev_z: int, cur_x: int, cur_z: int, tick_number: int, input_active: bool, track_query: TrackQueryResult = null) -> void:
 	if finished or timed_out:
 		return
 
@@ -84,6 +96,9 @@ func tick(prev_x: int, prev_z: int, cur_x: int, cur_z: int, tick_number: int, in
 		timed_out = true
 		return
 
+	if _validation_enabled:
+		_update_progress(cur_x, cur_z, track_query)
+
 	var prev_rel_x: int = prev_x - _p0_x
 	var prev_rel_z: int = prev_z - _p0_z
 	var cur_rel_x: int = cur_x - _p0_x
@@ -95,36 +110,54 @@ func tick(prev_x: int, prev_z: int, cur_x: int, cur_z: int, tick_number: int, in
 	if not _departed:
 		if cur_forward > DEPARTED_THRESHOLD:
 			_departed = true
-		return  # pas encore parti : jamais d'arrivée valide ce tick (évite le faux positif du tick 0)
+		return 
 
-	# Franchissement en sens inverse (prev_forward >= 0 et cur_forward < 0) :
-	# ne correspond à aucune des branches ci-dessous, donc ignoré sans effet
-	# de bord — c'est voulu, il ne doit jamais compter comme une arrivée.
 	if prev_forward > 0 or cur_forward <= 0:
 		return
 
-	# prev_forward <= 0 < cur_forward : franchissement dans le bon sens.
-	# Vérifie que ça se passe bien dans la largeur de la porte, pas au large.
 	var right_x: int = _tangent_z
 	var right_z: int = -_tangent_x
 	var prev_lateral: int = Fixed.mul(prev_rel_x, right_x) + Fixed.mul(prev_rel_z, right_z)
 	var cur_lateral: int = Fixed.mul(cur_rel_x, right_x) + Fixed.mul(cur_rel_z, right_z)
 
-	var denom: int = cur_forward - prev_forward  # > 0 ici (cur_forward > 0 >= prev_forward)
+	var denom: int = cur_forward - prev_forward 
 	var t: int = Fixed.div(-prev_forward, denom)
 	var lateral_at_crossing: int = prev_lateral + Fixed.mul(cur_lateral - prev_lateral, t)
 
-	if Fixed.abs(lateral_at_crossing) <= _half_width:
+	var progression_complete: bool = not _validation_enabled or validated_zone_count == validation_zone_count
+	if Fixed.abs(lateral_at_crossing) <= _half_width and run_valid and progression_complete:
 		finished = true
-		# Interpolation au sous-tick : `prev` est la position au tick
-		# (current_elapsed - 1), `cur` au tick current_elapsed — la ligne a
-		# été franchie entre les deux, à la fraction `t`. elapsed_fixed est
-		# donc un nombre de ticks Q16.16 (pas une fraction [-1,1]) ; le
-		# multiplier par MS_PAR_TICK (brut, 10) via Fixed.mul() est ici le
-		# cas VOULU où le résultat doit redescendre à l'échelle brute (des ms
-		# entières), pas rester en Q16.16 — à ne pas confondre avec le piège
-		# documenté dans CLAUDE.md (Fixed.mul() d'une grandeur Q16.16
-		# générale par un scalaire brut quand on veut au contraire GARDER
-		# l'échelle Q16.16, comme pour dpsi dans sim/car_sim.gd).
 		var elapsed_fixed: int = (current_elapsed - 1) * Fixed.ONE + t
 		finish_ms = Fixed.mul(elapsed_fixed, Horloge.MS_PAR_TICK)
+
+func _update_progress(cur_x: int, cur_z: int, track_query: TrackQueryResult) -> void:
+	var query: TrackQueryResult = track_query
+	if query == null:
+		_track.closest_point_near(cur_x, cur_z, _fallback_query)
+		query = _fallback_query
+	if not query.initialized:
+		run_valid = false
+		return
+
+	var current: int = query.progress
+	if not _has_progress:
+		_last_progress = current
+		_has_progress = true
+		return
+
+	var delta: int = current - _last_progress
+	if _track.est_ferme and _race_length > 0:
+		var half_lap: int = _race_length / 2
+		if delta < -half_lap:
+			delta += _race_length
+		elif delta > half_lap:
+			delta -= _race_length
+	_last_progress = current
+
+	if Fixed.abs(delta) > MAX_PROGRESS_STEP:
+		run_valid = false
+		return
+
+	_unwrapped_progress = maxi(0, _unwrapped_progress + delta)
+	while validated_zone_count < validation_zone_count and _unwrapped_progress >= _validation_gates[validated_zone_count]:
+		validated_zone_count += 1

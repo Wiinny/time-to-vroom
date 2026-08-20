@@ -969,18 +969,7 @@ Les checkpoints sont **optionnels** pour le créateur. Les points de repop
 générés automatiquement, eux, existent toujours le long du tracé — pour
 qu'une piste sans aucun checkpoint reste jouable.
 
-**Décision explicite : pas de modèle façon Mario Kart Wii.** L'idée
-initiale — franchissement dans un ordre imposé, anti-raccourci strict —
-est écartée : elle ouvrirait la porte à des stratégies de glitch/raccourci
-extrême (des runs de quelques secondes sur des pistes prévues pour durer
-bien plus longtemps), ce qui demanderait un leaderboard séparé pour ces
-runs-là — plus de travail que voulu pour l'instant. Le modèle retenu est
-volontairement permissif : un checkpoint ne fait que mettre à jour le point
-de réapparition, aucun ordre n'est imposé, aucun raccourci n'est détecté ni
-pénalisé. Pas encore implémenté (dépend du système de repop lui-même,
-toujours à construire, et de la détection d'une "chute" — voir « Ordre de
-travail », étape 3) — cette entrée documente la décision de conception, pas
-un état livré.
+Validation automatique du parcours.
 
 ---
 
@@ -1510,7 +1499,7 @@ Ordre de travail retenu :
 
 1. Conduite de la voiture sur une piste codée en dur — **jouable, feeling à régler**
 2. Format de fichier de piste + chargeur — **première version faite (`TrackData`), pas encore le format final**
-3. Chrono, checkpoints, repop, limite de temps — **chrono, ligne d'arrivée et limite de temps faits ; checkpoints et repop restants**
+3. **Checkpoints**
 4. Éditeur intégré — **première version faite ; comportement des éléments : Lot A câblé (zones/contact), Lot B restant (collision orientée, checkpoints)**
 5. Log d'inputs, rejeu déterministe, fantômes — **enregistrement + lecture + sélection par mode (perso/mondial/manuel) faits ; mods/temps aux checkpoints toujours absents du log, records mondiaux en placeholder (backend)**
 6. Site et backend — **publication depuis l'éditeur volontairement désactivée en attendant**
