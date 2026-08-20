@@ -1,18 +1,12 @@
-# Source unique de la liste des pistes jouables : la piste intégrée
-# (map/track_hardcoded.gd, non modifiable) suivie des pistes sauvegardées
-# dans user://tracks. Utilisé par ui/editor_menu.gd (lister pour éditer) et
-# ui/track_select.gd (lister pour jouer) — évite de dupliquer le parcours du
-# dossier entre les deux écrans.
 class_name TrackCatalog
 
 const BUILTIN_UID: String = "hardcoded_v1"
+const JUNGLE_UID: String = TrackJungle.UID
 
-# -> [{ "uid", "nom", "auteur", "path", "builtin": bool, "date_ajout" }, ...]
-# "path" est vide pour la piste intégrée (main.gd retombe sur
-# TrackHardcoded quand Session.pending_track_path est vide).
 static func list_tracks() -> Array[Dictionary]:
 	var result: Array[Dictionary] = [
 		{"uid": BUILTIN_UID, "nom": "Track Test 1", "auteur": "shmelebelek", "path": "", "builtin": true, "date_ajout": ""},
+		{"uid": JUNGLE_UID, "nom": TrackJungle.NOM, "auteur": TrackJungle.AUTEUR, "path": "", "builtin": true, "date_ajout": ""},
 	]
 
 	DirAccess.make_dir_recursive_absolute("user://tracks")
@@ -40,9 +34,16 @@ static func list_tracks() -> Array[Dictionary]:
 
 	return result
 
-# Supprime définitivement le fichier .tres d'une piste — utilisé par le menu
-# contextuel « Supprimer... » (ui/track_select.gd). No-op sur la piste
-# intégrée (path vide, jamais transmis ici par l'appelant).
+static func build_builtin(uid: String) -> Track:
+	if uid == JUNGLE_UID:
+		return TrackJungle.build()
+	return TrackHardcoded.build()
+
+static func builtin_start(uid: String) -> PackedInt64Array:
+	if uid == JUNGLE_UID:
+		return TrackJungle.start_transform()
+	return TrackHardcoded.start_transform()
+
 static func delete_track(path: String) -> void:
 	if path == "":
 		return

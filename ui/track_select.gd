@@ -1,14 +1,3 @@
-# Écran de sélection de piste (façon écran de sélection de morceau d'osu!) —
-# scène autonome comme main.tscn et editor/track_editor.tscn, atteinte
-# depuis "Jouer" dans ui/main_menu.gd. Voir CLAUDE.md, section « Menus et
-# remapping ».
-#
-# Le leaderboard "en ligne" et le multijoueur de la maquette dépendent d'un
-# serveur (hors scope, CLAUDE.md : pas de site/backend avant que le jeu soit
-# bon hors ligne) : cet écran n'affiche que l'historique LOCAL des runs du
-# joueur (ui/leaderboard.gd), avec le véhicule utilisé par entrée. Les
-# menus déroulants, le profil joueur et les options de jeu sont des
-# placeholders désactivés — définis plus tard (demande explicite).
 extends Control
 
 var _root_layout: VBoxContainer
@@ -23,15 +12,10 @@ var _personal_best_label: Label
 
 var _track_list: VBoxContainer
 var _track_button_group: ButtonGroup
-var _track_row_by_uid: Dictionary = {}  # uid -> Button
+var _track_row_by_uid: Dictionary = {} 
 var _group_option: OptionButton
-var _expanded_collection: String = ""  # nom de la collection dépliée, "" = aucune
+var _expanded_collection: String = ""  
 
-# Ordre = ordre des entrées dans _group_option (voir _build_top_bar()).
-# DATE_CREATION/DIFFICULTE/NOTE : placeholders désactivés, demandent le
-# site/backend ou une mécanique volontairement pas encore construite (voir
-# CLAUDE.md, sections correspondantes) — jamais atteints par _on_group_changed()
-# puisque Godot ne laisse pas sélectionner une entrée désactivée.
 enum GroupMode {
 	TOUTES, COLLECTIONS, CREATEUR, DATE_AJOUT, DATE_CREATION, DIFFICULTE,
 	DUREE, VEHICULE, NOTE, TITRE, MES_PISTES, RECEMMENT_JOUEES,
@@ -46,7 +30,7 @@ var _ghost_button: Button
 var _vehicle_button: Button
 
 var _all_tracks: Array[Dictionary] = []
-var _selected: Dictionary = {}  # entrée de TrackCatalog.list_tracks(), {} si aucune
+var _selected: Dictionary = {} 
 
 func _ready() -> void:
 	_build_ui()
@@ -62,12 +46,6 @@ func _build_ui() -> void:
 	var bg := ColorRect.new()
 	bg.color = Color(0.05, 0.05, 0.08)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# IGNORE, pas le défaut STOP d'un ColorRect : les conteneurs (VBoxContainer/
-	# HBoxContainer) laissent bien passer les clics par défaut (PASS, vérifié),
-	# mais un clic sur une zone vide finissait par atterrir sur CE ColorRect de
-	# fond (couvre tout l'écran, juste derrière), qui l'avalait silencieusement
-	# avant qu'il n'atteigne _unhandled_input() — c'est ce qui empêchait le
-	# clic-en-dehors-du-champ de libérer le focus de _search_edit.
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
@@ -104,7 +82,6 @@ func _build_ui() -> void:
 	_ghost_menu.closed.connect(_on_ghost_menu_closed)
 	add_child(_ghost_menu)
 
-# -------------------------------------------------------------- bandeau haut --
 
 func _build_top_bar(parent: VBoxContainer) -> void:
 	var bar := HBoxContainer.new()
@@ -135,11 +112,6 @@ func _build_top_bar(parent: VBoxContainer) -> void:
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# IGNORE, pas le défaut STOP d'un Control nu : ce spacer occupe une zone
-	# potentiellement large (EXPAND_FILL) et avalait silencieusement les clics
-	# qui y atterrissaient, avant même d'atteindre `bg` (voir son propre
-	# commentaire) ou _unhandled_input() — un deuxième endroit où le clic
-	# "en dehors du champ de recherche" pouvait mourir sans rien faire.
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(spacer)
 
@@ -157,16 +129,6 @@ func _build_top_bar(parent: VBoxContainer) -> void:
 	bar.add_child(group_label)
 
 	_group_option = OptionButton.new()
-	# fit_to_longest_item (vrai par défaut) fixe la taille MINIMALE du bouton
-	# fermé sur son item le plus large, même désactivé/jamais sélectionnable
-	# — ex. "Par date de création (bientôt disponible)" élargissait toute la
-	# barre du haut au-delà de l'écran, et avec elle _root_layout
-	# (VBoxContainer, largeur = max de ses enfants), poussant JOUER hors
-	# champ tout en bas (piège trouvé par diagnostic : clip_text, tenté
-	# d'abord, n'a AUCUN effet sur cette taille minimale — vérifié, ce n'est
-	# pas ce qu'il fallait couper). custom_minimum_size fixe une largeur
-	# raisonnable une fois fit_to_longest_item désactivé ; clip_text reste en
-	# plus par prudence si un futur item non désactivé s'avérait trop long.
 	_group_option.fit_to_longest_item = false
 	_group_option.clip_text = true
 	_group_option.custom_minimum_size = Vector2(200.0, 0.0)
@@ -188,7 +150,6 @@ func _build_top_bar(parent: VBoxContainer) -> void:
 	_group_option.item_selected.connect(_on_group_changed)
 	bar.add_child(_group_option)
 
-# ------------------------------------------------------------ colonne gauche --
 
 func _build_leaderboard_column(parent: HBoxContainer) -> void:
 	var col := VBoxContainer.new()
@@ -197,20 +158,12 @@ func _build_leaderboard_column(parent: HBoxContainer) -> void:
 	parent.add_child(col)
 
 	var mode := OptionButton.new()
-	# fit_to_longest_item=false + largeur figée : sans ça, la taille minimale
-	# s'aligne sur l'item désactivé le plus large et peut élargir toute cette
-	# colonne au-delà de sa largeur prévue (piège déjà rencontré et corrigé
-	# sur le menu "Regrouper par :", voir CLAUDE.md — appliqué ici par
-	# précaution, avant qu'un bug similaire n'apparaisse).
 	mode.fit_to_longest_item = false
 	mode.clip_text = true
 	mode.custom_minimum_size = Vector2(200.0, 0.0)
 	mode.add_item("Leaderboard local")
 	mode.add_item("Leaderboard mondial (bientôt disponible)")
 	mode.set_item_disabled(1, true)
-	# Structure prête, pas encore de site/backend (CLAUDE.md, "Ce qu'il ne
-	# faut pas faire") : mêmes placeholders désactivés que le reste de cet
-	# écran (Options de jeu, sections du menu "Regrouper par :").
 	mode.add_item("Leaderboard national (bientôt disponible)")
 	mode.set_item_disabled(2, true)
 	mode.add_item("Leaderboard amis (bientôt disponible)")
@@ -246,9 +199,6 @@ func _refresh_leaderboard() -> void:
 	for i in range(top.size()):
 		_leaderboard_list.add_child(_build_run_row(i + 1, top[i]))
 
-# Une ligne : rang, pastille de couleur du véhicule (VehicleRoster), pseudo
-# (placeholder fixe — pas de profil joueur pour l'instant, voir en-tête de
-# fichier), véhicule et temps.
 func _build_run_row(rank: int, entry: Dictionary) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
@@ -270,7 +220,6 @@ func _build_run_row(rank: int, entry: Dictionary) -> HBoxContainer:
 
 	return row
 
-# ------------------------------------------------------------ colonne centre --
 
 func _build_preview_column(parent: HBoxContainer) -> void:
 	var col := VBoxContainer.new()
@@ -285,7 +234,7 @@ func _build_preview_column(parent: HBoxContainer) -> void:
 
 	_preview_viewport = SubViewport.new()
 	_preview_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	_preview_viewport.own_world_3d = true  # isole ce monde 3D miniature de tout autre SubViewport
+	_preview_viewport.own_world_3d = true 
 	viewport_container.add_child(_preview_viewport)
 
 	var world_env := WorldEnvironment.new()
@@ -332,13 +281,10 @@ func _refresh_preview() -> void:
 
 func _track_for_selection(entry: Dictionary) -> Track:
 	if entry.get("builtin", false):
-		return TrackHardcoded.build()
+		return TrackCatalog.build_builtin(entry.get("uid", TrackCatalog.BUILTIN_UID))
 	var data: TrackData = TrackData.load_from_path(entry["path"])
 	return data.to_track() if data != null else null
 
-# Cadre une caméra orthogonale au-dessus des bornes XZ de la piste, avec une
-# légère inclinaison façon plan de course — flottants autorisés ici, c'est
-# du rendu (voir CLAUDE.md, règle 1).
 func _frame_track(camera: Camera3D, track: Track) -> void:
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	var n: int = track.point_count()
@@ -381,7 +327,6 @@ func _refresh_personal_best() -> void:
 	else:
 		_personal_best_label.text = "%s — Temps : %s" % [vehicle_nom, TimeFormat.format_ms(int(best["ms"]))]
 
-# ------------------------------------------------------------ colonne droite --
 
 func _build_track_list_column(parent: HBoxContainer) -> void:
 	var col := VBoxContainer.new()
@@ -427,24 +372,14 @@ func _refresh_catalog(filter: String = "") -> void:
 		_track_list.add_child(empty)
 
 	var target: Dictionary = {}
-	# Seul l'accordéon des collections a un état replié à gérer : tous les
-	# autres modes (flat ou sectionné) affichent tout immédiatement, comme
-	# "Toutes les pistes".
 	if _group_mode != GroupMode.COLLECTIONS or _expanded_collection != "":
 		target = _selected
 		if target.is_empty() or not _track_row_by_uid.has(target.get("uid", "")):
 			target = filtered[0] if not filtered.is_empty() else {}
-			# En mode regroupé (collections), ne présélectionner que si la
-			# piste appartient bien à la ligne visible (dans la collection
-			# dépliée).
 			if _group_mode == GroupMode.COLLECTIONS and not _track_row_by_uid.has(target.get("uid", "")):
 				target = {}
 	_select_track(target)
 
-# Dispatche vers le bon renderer selon _group_mode. Les modes basés sur
-# Leaderboard (DUREE, RECEMMENT_JOUEES) précalculent leurs données ici :
-# TrackGrouping est statique/pur, sans dépendance à l'autoload Leaderboard
-# (même contrainte de testabilité que replay/ghost_resolver.gd).
 func _build_catalog_rows(filtered: Array[Dictionary]) -> bool:
 	match _group_mode:
 		GroupMode.COLLECTIONS:
@@ -464,11 +399,8 @@ func _build_catalog_rows(filtered: Array[Dictionary]) -> bool:
 		GroupMode.MES_PISTES:
 			return _build_flat_list(filtered.filter(func(e: Dictionary) -> bool: return not bool(e.get("builtin", false))))
 		_:
-			return _build_flat_list(filtered)  # TOUTES, et repli pour un mode inattendu
+			return _build_flat_list(filtered) 
 
-# uid -> meilleur temps perso en ms, tous véhicules confondus (Leaderboard.
-# runs() est déjà trié par temps croissant). Absent du dictionnaire = jamais
-# joué — TrackGrouping.sections_duree() traite cette absence comme telle.
 func _meilleurs_temps_par_uid(filtered: Array[Dictionary]) -> Dictionary:
 	var result: Dictionary = {}
 	for entry in filtered:
@@ -477,8 +409,6 @@ func _meilleurs_temps_par_uid(filtered: Array[Dictionary]) -> Dictionary:
 			result[entry["uid"]] = int(runs[0]["ms"])
 	return result
 
-# uid -> unix du run le plus récent, tous véhicules confondus. Absent du
-# dictionnaire = jamais joué.
 func _derniers_joues_par_uid(filtered: Array[Dictionary]) -> Dictionary:
 	var result: Dictionary = {}
 	for entry in filtered:
@@ -491,9 +421,6 @@ func _derniers_joues_par_uid(filtered: Array[Dictionary]) -> Dictionary:
 			result[entry["uid"]] = dernier
 	return result
 
-# Sections toujours dépliées (PAS l'accordéon des collections) : un Label
-# d'entête non interactif par section, suivi de ses lignes — même
-# _build_track_row() que partout ailleurs sur cet écran.
 func _build_sectioned_list(sections: Array[Dictionary]) -> bool:
 	for section in sections:
 		_track_list.add_child(_build_section_header(String(section["label"])))
@@ -517,11 +444,6 @@ func _build_flat_list(filtered: Array[Dictionary]) -> bool:
 		_track_row_by_uid[entry["uid"]] = button
 	return not filtered.is_empty()
 
-# Une entrée par collection (Collections.list_names()), repliée par défaut ;
-# cliquer une entête la déplie et referme la précédente (accordéon, une
-# seule collection ouverte à la fois — demande explicite). Les pistes
-# supprimées entre-temps ou filtrées par la recherche n'apparaissent pas
-# dans une collection dépliée.
 func _build_grouped_list(filtered: Array[Dictionary]) -> bool:
 	var by_uid: Dictionary = {}
 	for entry in filtered:
@@ -568,9 +490,6 @@ func _on_collection_header_pressed(name: String) -> void:
 	_expanded_collection = "" if _expanded_collection == name else name
 	_refresh_catalog(_search_edit.text)
 
-# Le badge de difficulté et la barre restent neutres : la difficulté est
-# calculée rétroactivement plus tard (voir CLAUDE.md, section « Éléments de
-# piste ») — la place est réservée, pas encore la mécanique.
 func _build_track_row(entry: Dictionary) -> Button:
 	var button := Button.new()
 	button.toggle_mode = true
@@ -618,16 +537,12 @@ func _build_track_row(entry: Dictionary) -> Button:
 
 	return button
 
-# ------------------------------------------------------------- menu contextuel --
 
 func _on_track_row_gui_input(event: InputEvent, entry: Dictionary) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 		_show_context_menu(entry)
 		get_viewport().set_input_as_handled()
 
-# Adapté du menu contextuel d'osu! (clic droit sur une carte) — « Marquer
-# comme jouée » n'a pas d'équivalent ici (pas de filtre « non joué », voir
-# CLAUDE.md) et n'a volontairement pas été repris.
 func _show_context_menu(entry: Dictionary) -> void:
 	var builtin: bool = entry.get("builtin", false)
 
@@ -680,15 +595,6 @@ func _confirm_delete_track(entry: Dictionary) -> void:
 	dialog.confirmed.connect(dialog.queue_free)
 	dialog.canceled.connect(dialog.queue_free)
 	add_child(dialog)
-	# get_cancel_button() n'existe qu'une fois le dialogue DANS l'arbre
-	# (add_child() ci-dessus) : l'appeler avant plantait la fonction (nœud pas
-	# encore construit), empêchant popup_centered() de s'exécuter — le
-	# panneau ne s'affichait plus du tout. Repli anglais par défaut sinon
-	# ("Cancel"), même logique que le titre "Confirmation". Pas de
-	# get_close_button() : cette méthode n'existe pas sur ConfirmationDialog
-	# dans cette version de Godot (vérifié) — la croix de fermeture de la
-	# barre de titre reste, aucune API scriptable pour la retirer sans virer
-	# toute la barre de titre (donc aussi "Confirmation").
 	dialog.get_cancel_button().text = "Annuler"
 	dialog.popup_centered()
 
@@ -708,15 +614,6 @@ func _confirm_clear_scores(entry: Dictionary) -> void:
 	dialog.confirmed.connect(dialog.queue_free)
 	dialog.canceled.connect(dialog.queue_free)
 	add_child(dialog)
-	# get_cancel_button() n'existe qu'une fois le dialogue DANS l'arbre
-	# (add_child() ci-dessus) : l'appeler avant plantait la fonction (nœud pas
-	# encore construit), empêchant popup_centered() de s'exécuter — le
-	# panneau ne s'affichait plus du tout. Repli anglais par défaut sinon
-	# ("Cancel"), même logique que le titre "Confirmation". Pas de
-	# get_close_button() : cette méthode n'existe pas sur ConfirmationDialog
-	# dans cette version de Godot (vérifié) — la croix de fermeture de la
-	# barre de titre reste, aucune API scriptable pour la retirer sans virer
-	# toute la barre de titre (donc aussi "Confirmation").
 	dialog.get_cancel_button().text = "Annuler"
 	dialog.popup_centered()
 
@@ -748,7 +645,6 @@ func _select_track(entry: Dictionary) -> void:
 	_refresh_leaderboard()
 	_refresh_personal_best()
 
-# --------------------------------------------------------------- barre basse --
 
 func _build_bottom_bar(parent: VBoxContainer) -> void:
 	var bar := HBoxContainer.new()
@@ -779,11 +675,6 @@ func _build_bottom_bar(parent: VBoxContainer) -> void:
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# IGNORE, pas le défaut STOP d'un Control nu : ce spacer occupe une zone
-	# potentiellement large (EXPAND_FILL) et avalait silencieusement les clics
-	# qui y atterrissaient, avant même d'atteindre `bg` (voir son propre
-	# commentaire) ou _unhandled_input() — un deuxième endroit où le clic
-	# "en dehors du champ de recherche" pouvait mourir sans rien faire.
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(spacer)
 
@@ -794,10 +685,6 @@ func _build_bottom_bar(parent: VBoxContainer) -> void:
 	_play_button.pressed.connect(_on_play_pressed)
 	bar.add_child(_play_button)
 
-# Dropdown au-dessus du bouton, PAS un overlay plein écran (maquette
-# utilisateur) : _root_layout reste visible en fond, pas de hide()/show()
-# ici. Bascule : ré-appuyer sur le bouton pendant que le menu est ouvert le
-# referme sans repasser par _on_vehicle_menu_closed() (même résultat).
 func _on_vehicle_pressed() -> void:
 	if _vehicle_menu.visible:
 		_vehicle_menu.hide()
@@ -808,8 +695,8 @@ func _on_vehicle_pressed() -> void:
 
 func _on_vehicle_menu_closed() -> void:
 	_vehicle_menu.hide()
-	_refresh_personal_best()  # dépend du véhicule sélectionné, peut avoir changé
-	_refresh_ghost_button()  # idem pour un fantôme en mode "véhicule courant"
+	_refresh_personal_best()  
+	_refresh_ghost_button() 
 	_vehicle_button.grab_focus()
 
 func _on_ghost_pressed() -> void:
@@ -823,11 +710,9 @@ func _on_ghost_pressed() -> void:
 func _on_ghost_menu_closed() -> void:
 	_ghost_menu.hide()
 	_root_layout.show()
-	_refresh_ghost_button()  # la sélection a pu changer dans le menu
+	_refresh_ghost_button() 
 	_ghost_button.grab_focus()
 
-# Reflète GhostSelection (autoload, persistant par piste) — pas d'état local
-# à garder à jour ici, voir replay/ghost_resolver.gd::libelle().
 func _refresh_ghost_button() -> void:
 	if _selected.is_empty():
 		return
@@ -838,26 +723,11 @@ func _refresh_ghost_button() -> void:
 func _on_back_pressed() -> void:
 	get_tree().change_scene_to_file("res://ui/main_menu.tscn")
 
-# Échap déclenche "Retour" comme sur tous les écrans qui en proposent un
-# (voir ui/vehicle_menu.gd, ui/editor_menu.gd, ui/settings_menu.gd,
-# ui/ghost_menu.gd). Gardé à `_root_layout.visible` : un overlay
-# (VehicleMenu/CollectionsMenu/GhostMenu) peut être ouvert par-dessus cet
-# écran, auquel cas c'est SON propre _unhandled_input() qui doit fermer
-# l'overlay, pas celui-ci qui doit sauter directement au menu principal.
 func _unhandled_input(event: InputEvent) -> void:
 	if _root_layout.visible and event.is_action_pressed("ui_cancel"):
 		_on_back_pressed()
 		get_viewport().set_input_as_handled()
 
-# _input(), PAS _unhandled_input() : ce dernier ne reçoit un clic QUE si
-# aucun Control ne l'a consommé avant (mouse_filter STOP, même sans aucun
-# handler) — en pratique le clic n'atteignait jamais _unhandled_input() ici
-# (vérifié par trace : jamais une seule fois, même après avoir mis IGNORE
-# sur le fond et les spacers), pour une raison qui reste incertaine dans
-# cette arborescence profondément imbriquée. _input() s'exécute AVANT tout
-# le système de Control, donc voit CE clic sans dépendre de la chaîne
-# mouse_filter — vérification de position directe plutôt que de compter sur
-# le fait qu'aucun autre Control ne l'ait réclamé.
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and _search_edit.has_focus():
 		var click_pos: Vector2 = (event as InputEventMouseButton).position
@@ -868,4 +738,5 @@ func _on_play_pressed() -> void:
 	if _selected.is_empty():
 		return
 	Session.pending_track_path = _selected.get("path", "")
+	Session.pending_builtin_uid = _selected.get("uid", "") if _selected.get("builtin", false) else ""
 	get_tree().change_scene_to_file("res://main.tscn")

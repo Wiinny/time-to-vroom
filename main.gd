@@ -1,6 +1,6 @@
 extends Node3D
 
-const REC_CHUNK: int = 6000  
+const REC_CHUNK: int = 6000 
 const VALIDATION_MAX_TICKS: int = 60000
 const VALIDER_APRES_RUN: bool = true
 
@@ -26,7 +26,7 @@ var _rec_frein: PackedByteArray = PackedByteArray()
 var _rec_braquage: PackedByteArray = PackedByteArray()
 var _rec_derapage: PackedByteArray = PackedByteArray()
 var _rec_count: int = 0
-var _rec_start_tick: int = -1  
+var _rec_start_tick: int = -1 
 
 var _ghost_file: String = ""
 var _ghost_replay: ReplayData = null
@@ -76,21 +76,27 @@ func _ready() -> void:
 	_camera.set_target(_car_view)
 
 func _build_environment() -> void:
+	var jungle: bool = _track.visual_theme == "jungle"
 	var world_env := WorldEnvironment.new()
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color(0.32, 0.47, 0.66)
+	environment.background_color = Color(0.055, 0.16, 0.105) if jungle else Color(0.32, 0.47, 0.66)
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.66, 0.76, 0.92)
-	environment.ambient_light_energy = 0.72
+	environment.ambient_light_color = Color(0.42, 0.62, 0.38) if jungle else Color(0.66, 0.76, 0.92)
+	environment.ambient_light_energy = 0.86 if jungle else 0.72
 	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	if jungle:
+		environment.fog_enabled = true
+		environment.fog_light_color = Color(0.18, 0.34, 0.20)
+		environment.fog_light_energy = 0.65
+		environment.fog_density = 0.0035
 	world_env.environment = environment
 	add_child(world_env)
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-52.0, -28.0, 0.0)
-	sun.light_color = Color(1.0, 0.91, 0.76)
-	sun.light_energy = 1.25
+	sun.light_color = Color(1.0, 0.82, 0.48) if jungle else Color(1.0, 0.91, 0.76)
+	sun.light_energy = 1.5 if jungle else 1.25
 	sun.shadow_enabled = true
 	add_child(sun)
 
@@ -104,12 +110,17 @@ func _load_track() -> void:
 			_start = data.start_transform()
 			_track_id = data.uid
 			_elements = data.elements
+			Session.pending_builtin_uid = ""
 			return
 
-	_track = TrackHardcoded.build()
-	_start = TrackHardcoded.start_transform()
-	_track_id = TrackCatalog.BUILTIN_UID
-	_elements = []  
+	var builtin_uid: String = Session.pending_builtin_uid
+	Session.pending_builtin_uid = ""
+	if builtin_uid == "":
+		builtin_uid = TrackCatalog.BUILTIN_UID
+	_track = TrackCatalog.build_builtin(builtin_uid)
+	_start = TrackCatalog.builtin_start(builtin_uid)
+	_track_id = builtin_uid
+	_elements = [] 
 
 func _resoudre_fantome() -> void:
 	var file: String = GhostResolver.resolve(

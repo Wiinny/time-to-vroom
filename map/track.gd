@@ -3,10 +3,15 @@ class_name Track
 const LOCAL_SEARCH_BEHIND: int = 6
 const LOCAL_SEARCH_AHEAD: int = 12
 
+enum Surface { ASPHALTE, TERRE, BOUE }
+
 var point_x: PackedInt64Array = PackedInt64Array()
 var point_y: PackedInt64Array = PackedInt64Array()
 var point_z: PackedInt64Array = PackedInt64Array()
 var half_width: PackedInt64Array = PackedInt64Array()
+var surface_kind: PackedByteArray = PackedByteArray()
+
+var visual_theme: String = "default"
 
 var est_ferme: bool = true
 
@@ -24,11 +29,12 @@ var _progress_ready: bool = false
 func point_count() -> int:
 	return point_x.size()
 
-func add_point(x: int, y: int, z: int, hw: int) -> void:
+func add_point(x: int, y: int, z: int, hw: int, surface: int = Surface.ASPHALTE) -> void:
 	point_x.push_back(x)
 	point_y.push_back(y)
 	point_z.push_back(z)
 	half_width.push_back(hw)
+	surface_kind.push_back(clampi(surface, Surface.ASPHALTE, Surface.BOUE))
 	_progress_ready = false
 
 func element_count() -> int:
@@ -145,4 +151,5 @@ func _consider_segment(px: int, pz: int, i: int, best_dist_sq: int, result: Trac
 	result.lateral_offset = Fixed.mul(ddx, tangent_z) - Fixed.mul(ddz, tangent_x)
 	result.height = point_y[i] + Fixed.mul(point_y[j] - point_y[i], t)
 	result.half_width = half_width[i] + Fixed.mul(half_width[j] - half_width[i], t)
+	result.surface_kind = surface_kind[i] if i < surface_kind.size() else Surface.ASPHALTE
 	return dist_sq

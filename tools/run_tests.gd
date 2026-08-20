@@ -1,7 +1,7 @@
 extends SceneTree
 
 const REFERENCE_HASH: int = 3586582507276794061  
-const SEQUENCE_LENGTH: int = 6000 
+const SEQUENCE_LENGTH: int = 6000  
 
 var _passes: int = 0
 var _failures: int = 0
@@ -141,8 +141,8 @@ func _test_race_state() -> void:
 	var rs2 := RaceState.new()
 	rs2.setup(track, false)
 	rs2.reset()
-	rs2.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true) 
-	rs2.tick(0, Fixed.from_int(-1), 0, Fixed.from_int(1), 2, true) 
+	rs2.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true)  
+	rs2.tick(0, Fixed.from_int(-1), 0, Fixed.from_int(1), 2, true)  
 	_check("race_state: arrivée valide après un tour", rs2.finished)
 	_check("race_state: finish_ms interpolé au sous-tick (départ au tick 1, franchissement à mi-tick)", rs2.finish_ms == 5)
 
@@ -150,14 +150,14 @@ func _test_race_state() -> void:
 	rs3.setup(track, false)
 	rs3.reset()
 	rs3.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true)
-	rs3.tick(0, Fixed.from_int(1), 0, Fixed.from_int(-1), 2, true)  
+	rs3.tick(0, Fixed.from_int(1), 0, Fixed.from_int(-1), 2, true)
 	_check("race_state: pas d'arrivée en sens inverse", not rs3.finished)
 
 	var rs4 := RaceState.new()
 	rs4.setup(track, false)
 	rs4.reset()
 	rs4.tick(0, Fixed.from_int(2), 0, Fixed.from_int(5), 1, true)
-	rs4.tick(Fixed.from_int(10), Fixed.from_int(-1), Fixed.from_int(10), Fixed.from_int(1), 2, true) 
+	rs4.tick(Fixed.from_int(10), Fixed.from_int(-1), Fixed.from_int(10), Fixed.from_int(1), 2, true)
 	_check("race_state: pas d'arrivée hors largeur de piste", not rs4.finished)
 
 	var rs5 := RaceState.new()
@@ -180,10 +180,10 @@ func _test_race_state() -> void:
 	var rs7 := RaceState.new()
 	rs7.setup(track, false)
 	rs7.reset()
-	rs7.tick(0, 0, 0, 0, 5, false) 
+	rs7.tick(0, 0, 0, 0, 5, false)  
 	_check("race_state: pas parti tant qu'aucun input n'est actif", not rs7.started)
 	_check("race_state: chrono à zéro tant qu'aucun input n'est actif", rs7.current_elapsed == 0)
-	rs7.tick(0, 0, 0, Fixed.from_int(1), 6, true) 
+	rs7.tick(0, 0, 0, Fixed.from_int(1), 6, true)  # premier input, au tick 6
 	_check("race_state: parti dès le premier input", rs7.started)
 	_check("race_state: chrono à zéro pile au premier input", rs7.current_elapsed == 0)
 	rs7.tick(0, Fixed.from_int(1), 0, Fixed.from_int(2), 7, true)
@@ -200,7 +200,7 @@ func _test_race_state_ouverte() -> void:
 	rs1.setup(track, false)
 	rs1.reset()
 	rs1.tick(0, Fixed.from_int(0), 0, Fixed.from_int(10), 1, true)  
-	rs1.tick(0, Fixed.from_int(49), 0, Fixed.from_int(51), 2, true) 
+	rs1.tick(0, Fixed.from_int(49), 0, Fixed.from_int(51), 2, true)  
 	_check("race_state ouverte: arrivée dès le premier franchissement, sans attendre l'éloignement", rs1.finished)
 	_check("race_state ouverte: finish_ms interpolé au sous-tick", rs1.finish_ms == 5)
 
@@ -224,7 +224,7 @@ func _test_race_state_ouverte() -> void:
 	rs4.setup(track, false)
 	rs4.reset()
 	rs4.tick(Fixed.from_int(10), Fixed.from_int(0), Fixed.from_int(10), Fixed.from_int(10), 1, true)
-	rs4.tick(Fixed.from_int(10), Fixed.from_int(49), Fixed.from_int(10), Fixed.from_int(51), 2, true)  
+	rs4.tick(Fixed.from_int(10), Fixed.from_int(49), Fixed.from_int(10), Fixed.from_int(51), 2, true) 
 	_check("race_state ouverte: pas d'arrivée hors largeur de piste", not rs4.finished)
 
 	var ferme := Track.new()
@@ -316,7 +316,7 @@ func _test_collision_gabarit() -> void:
 func _test_track_data_start_transform() -> void:
 	var data := TrackData.new()
 	data.add_point(Fixed.from_int(0), 0, Fixed.from_int(0), Fixed.from_int(5))
-	data.add_point(Fixed.from_int(10), 0, Fixed.from_int(0), Fixed.from_int(5))
+	data.add_point(Fixed.from_int(10), 0, Fixed.from_int(0), Fixed.from_int(5))  
 	var start: PackedInt64Array = data.start_transform()
 	_check_approx("TrackData.start_transform: cap dérivé du segment 0->1 (vers +X ici)", int(start[3]), FixedMath.QUARTER_TURN, 2)
 	_check("TrackData.start_transform: position en Q16.16 telle quelle (pas de reconversion)", int(start[0]) == 0 and int(start[2]) == 0)
@@ -345,7 +345,7 @@ func _test_courbe_accel() -> void:
 	var input := InputFrame.new()
 	input.accel = Fixed.ONE
 
-	var config := CarConfigGt.new() 
+	var config := CarConfigGt.new()  
 	config.bake()
 
 	var state_bas := CarState.new()
@@ -367,7 +367,7 @@ func _test_courbe_accel() -> void:
 	var delta_mid: int = state_mid.vit_z - config.palier_accel / 2
 	_check("courbe d'accel monotone entre accel_basse et accel_haute", delta_mid < config.accel_basse and delta_mid > config.accel_haute)
 
-	var config_lin := CarConfigFormula.new() 
+	var config_lin := CarConfigFormula.new()  
 	config_lin.bake()
 	var state_lin_bas := CarState.new()
 	state_lin_bas.reset(0, 0, 0, 0)
@@ -410,13 +410,13 @@ func _test_braquage_progressif() -> void:
 	var input := InputFrame.new()
 	input.braquage = Fixed.ONE
 
-	var config_lent := CarConfigSuperbike.new()  
+	var config_lent := CarConfigSuperbike.new() 
 	config_lent.bake()
 	var state_lent := CarState.new()
 	state_lent.reset(0, 0, 0, 0)
 	CarSim.tick(state_lent, input, track, config_lent, query)
 
-	var config_rapide := CarConfigStreetBike.new()  
+	var config_rapide := CarConfigStreetBike.new() 
 	config_rapide.bake()
 	var state_rapide := CarState.new()
 	state_rapide.reset(0, 0, 0, 0)
@@ -436,7 +436,7 @@ func _test_sous_virage() -> void:
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
-	state.vit_z = config.vitesse_max 
+	state.vit_z = config.vitesse_max  
 
 	var v_avant: int = FixedMath.length_2d(state.vit_x, state.vit_z)
 	for i in range(120):
@@ -504,14 +504,14 @@ func _test_glisse_travers() -> void:
 	_check("glisse (PIVOT_AVANT) : corrigeable — revient vers l'axe au relâchement", Fixed.abs(_lateral_speed(state)) < Fixed.ONE / 10)
 
 func _test_saut_arc() -> void:
-	var config := CarConfigStreetBike.new()  
+	var config := CarConfigStreetBike.new() 
 	config.bake()
 	var track: Track = _build_wide_track()
 	var query := TrackQueryResult.new()
 
 	var input := InputFrame.new()
 	input.braquage = Fixed.ONE
-	input.derapage = Fixed.ONE 
+	input.derapage = Fixed.ONE  
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
@@ -529,7 +529,7 @@ func _test_saut_arc() -> void:
 	_check_approx("saut (SAUT_ARC) : durée en l'air ≈ saut_duree_ticks", ticks_en_l_air, config.saut_duree_ticks, 2)
 	_check("saut (SAUT_ARC) : de retour au sol après la phase aérienne", state.au_sol)
 
-	for i in range(30):  
+	for i in range(30): 
 		CarSim.tick(state, input, track, config, query)
 	_check("saut (SAUT_ARC) : engage bien la phase ARC après atterrissage (glisse_etat == ARC ou déjà relâché)", state.glisse_etat == CarState.GlisseEtat.ARC or state.glisse_etat == CarState.GlisseEtat.LIBRE)
 
@@ -537,7 +537,7 @@ func _test_saut_arc() -> void:
 	_check("saut (SAUT_ARC) : coût en vitesse appliqué (cout_vitesse_saut + drain de l'arc)", v_apres < v_avant)
 
 func _test_permanente() -> void:
-	var config := CarConfigHover.new() 
+	var config := CarConfigHover.new()  
 	config.bake()
 	var track: Track = _build_wide_track()
 	var query := TrackQueryResult.new()
@@ -565,7 +565,7 @@ func _test_permanente() -> void:
 func _test_boost() -> void:
 	var config_a := CarConfigGt.new()
 	config_a.bake()
-	var config_b := CarConfigHover.new()  
+	var config_b := CarConfigHover.new() 
 	config_b.bake()
 
 	var state := CarState.new()
@@ -628,13 +628,13 @@ func _test_element_boost() -> void:
 	config.bake()
 	var track: Track = _build_element_track(ElementRoster.Kind.BOOST, 0, 0)
 	var query := TrackQueryResult.new()
-	var input := InputFrame.new() 
+	var input := InputFrame.new()  
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
 	state.vit_z = config.vitesse_max
 
-	state.pos_x = 0; state.pos_z = 0  
+	state.pos_x = 0; state.pos_z = 0
 	CarSim.tick(state, input, track, config, query)
 	_check("boost (élément) : déclenché au premier tick dans le rayon", state.bonus_vitesse > 0)
 	var bonus_apres_entree: int = state.bonus_vitesse
@@ -643,7 +643,7 @@ func _test_element_boost() -> void:
 	CarSim.tick(state, input, track, config, query)
 	_check("boost (élément) : pas de nouveau déclenchement en restant sur le pad", state.bonus_vitesse <= bonus_apres_entree)
 
-	state.pos_x = Fixed.from_int(50); state.pos_z = 0 
+	state.pos_x = Fixed.from_int(50); state.pos_z = 0  
 	CarSim.tick(state, input, track, config, query)
 	state.pos_x = 0; state.pos_z = 0  
 	var bonus_avant_retour: int = state.bonus_vitesse
@@ -685,25 +685,25 @@ func _test_element_ralentit() -> void:
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)
-	state.vit_z = config.vitesse_max  
+	state.vit_z = config.vitesse_max 
 
 	CarSim.tick(state, input, track, config, query)
 	_check("route_ralentit : pas un mur — la vitesse ne chute pas d'un coup au plafond dès le premier tick", FixedMath.length_2d(state.vit_x, state.vit_z) > ElementEffects.ralentit_plafond)
 
 	for i in range(1000):
-		state.pos_x = 0; state.pos_z = 0 
+		state.pos_x = 0; state.pos_z = 0  
 		CarSim.tick(state, input, track, config, query)
 	var v_final: int = FixedMath.length_2d(state.vit_x, state.vit_z)
 	_check_approx("route_ralentit : converge vers le plafond de zone après un moment plein régime", v_final, ElementEffects.ralentit_plafond, Fixed.from_float(0.03))
 
 	var state_hors := CarState.new()
-	state_hors.reset(Fixed.from_int(1000), 0, 0, 0) 
+	state_hors.reset(Fixed.from_int(1000), 0, 0, 0)  
 	state_hors.vit_z = config.vitesse_max
 	CarSim.tick(state_hors, input, track, config, query)
 	_check("route_ralentit : hors zone, la vitesse max n'est pas plafonnée", FixedMath.length_2d(state_hors.vit_x, state_hors.vit_z) > ElementEffects.ralentit_plafond)
 
 func _test_element_degrade_controles() -> void:
-	var config := CarConfigStreetBike.new() 
+	var config := CarConfigStreetBike.new()  
 	config.bake()
 	var track: Track = _build_element_track(ElementRoster.Kind.ROUTE_DEGRADE_CONTROLES, 0, 0)
 	var query := TrackQueryResult.new()
@@ -773,7 +773,7 @@ func _test_element_obstacle_ralentit() -> void:
 	_check("obstacle_ralentit : ne fait jamais reculer", state.vit_z >= 0)
 
 	var v_apres_premier: int = v_apres
-	state.pos_x = 0; state.pos_z = 0 
+	state.pos_x = 0; state.pos_z = 0  
 	CarSim.tick(state, input, track, config, query)
 	_check("obstacle_ralentit : pas de second impact en restant dans le rayon", FixedMath.length_2d(state.vit_x, state.vit_z) >= v_apres_premier - Fixed.from_float(0.02))
 
@@ -818,7 +818,7 @@ func _test_element_zones_ne_cumulent_pas() -> void:
 	var track_un: Track = _build_element_track(ElementRoster.Kind.ROUTE_DEGRADE_CONTROLES, 0, 0)
 	var track_deux: Track = _build_wide_track()
 	track_deux.add_element(ElementRoster.Kind.ROUTE_DEGRADE_CONTROLES, 0, 0, 0, 0)
-	track_deux.add_element(ElementRoster.Kind.ROUTE_DEGRADE_CONTROLES, Fixed.from_int(1), 0, Fixed.from_int(1), 0)  # se chevauche avec la première
+	track_deux.add_element(ElementRoster.Kind.ROUTE_DEGRADE_CONTROLES, Fixed.from_int(1), 0, Fixed.from_int(1), 0)
 	var query := TrackQueryResult.new()
 	var input := InputFrame.new()
 	input.braquage = Fixed.ONE
@@ -862,7 +862,7 @@ func _test_element_sans_effet() -> void:
 	]
 	for kind in kinds_lot_b:
 		var avec_element: Track = TrackHardcoded.build()
-		avec_element.add_element(kind, 0, 0, 0, 0)  # exactement sous le point de départ
+		avec_element.add_element(kind, 0, 0, 0, 0) 
 		var h: int = _run_sequence_sur_piste(avec_element, CarConfig.new(), seq)
 		_check("élément sans effet en Lot A (kind %d) posé sous la voiture : hash identique à une piste sans éléments" % kind, h == h_reference)
 
@@ -875,7 +875,7 @@ func _test_element_reset() -> void:
 
 	var state := CarState.new()
 	state.reset(0, 0, 0, 0)  
-	state.vit_z = config.vitesse_max  
+	state.vit_z = config.vitesse_max 
 	CarSim.tick(state, input, track, config, query)
 	_check("reset (éléments) : boost déclenché une première fois", state.bonus_vitesse > 0)
 
@@ -997,7 +997,7 @@ func _test_replay_serialisation() -> void:
 	replay.vehicle_id = "hover"
 	replay.finish_ms = 98765
 	replay.date = "test"
-	replay.hash_final = -1234567890123456789 
+	replay.hash_final = -1234567890123456789  
 	replay.start_tick = 3
 	replay.accel_crans = crans[0]
 	replay.frein_crans = crans[1]
@@ -1023,7 +1023,7 @@ func _test_replay_serialisation() -> void:
 
 func _test_deux_mondes_isoles() -> void:
 	var seq_a: Array[InputFrame] = _make_input_sequence(1500)
-	var seq_b: Array[InputFrame] = _make_input_sequence(1200)  
+	var seq_b: Array[InputFrame] = _make_input_sequence(1200) 
 
 	var ref_a: int = _run_sequence(seq_a)
 	var world_ref_b: World = _build_test_world()
@@ -1145,7 +1145,7 @@ func _test_track_grouping_alpha() -> void:
 	_check("grouping alpha: espaces seuls -> Autre", TrackGrouping._alpha_label("   ") == "Autre")
 
 func _test_track_grouping_date_ajout() -> void:
-	var jour1: int = 1700000000  
+	var jour1: int = 1700000000 
 	var jour2: int = jour1 + 2 * 86400
 	var str_jour1: String = Time.get_datetime_string_from_unix_time(jour1)
 	var str_jour1_plus_tard: String = Time.get_datetime_string_from_unix_time(jour1 + 3600)
@@ -1197,13 +1197,13 @@ func _test_track_grouping_duree() -> void:
 func _test_track_grouping_recemment_jouees() -> void:
 	var now: float = Time.get_unix_time_from_system()
 	var derniers_joues: Dictionary = {
-		"a": now - 3600.0,         
+		"a": now - 3600.0,        
 		"b": now - 3.0 * 86400.0,   
-		"c": now - 15.0 * 86400.0, 
-		"d": now - 40.0 * 86400.0,   
+		"c": now - 15.0 * 86400.0,   
+		"d": now - 40.0 * 86400.0,  
 	}
 	var entries: Array[Dictionary] = [
-		{"uid": "a"}, {"uid": "b"}, {"uid": "c"}, {"uid": "d"}, {"uid": "e"}, 
+		{"uid": "a"}, {"uid": "b"}, {"uid": "c"}, {"uid": "d"}, {"uid": "e"},  
 	]
 	var sections: Array[Dictionary] = TrackGrouping.sections_recemment_jouees(entries, derniers_joues)
 	var attendu: Array[String] = ["a", "b", "c", "d", "e"]
@@ -1245,6 +1245,76 @@ func _test_configs_chargeables() -> void:
 		config.bake()
 		_check("config '%s': vitesse_max bakée non nulle" % id, config.vitesse_max > 0)
 		_check("config '%s': accel_basse bakée non nulle" % id, config.accel_basse > 0)
+
+func _test_jungle_dominante() -> void:
+	var track := TrackJungle.build()
+	track.prepare_progress(true)
+	_check("jungle: circuit fermé de 66 points", track.est_ferme and track.point_count() == 66)
+	_check("jungle: longueur calibrée entre 940 et 980 m",
+		track.total_length() >= Fixed.from_int(940) and track.total_length() <= Fixed.from_int(980))
+	_check("jungle: thème visuel actif", track.visual_theme == "jungle")
+	var mud_count: int = 0
+	var narrow_count: int = 0
+	for i in range(track.point_count()):
+		if track.surface_kind[i] == Track.Surface.BOUE:
+			mud_count += 1
+		if track.half_width[i] == Fixed.from_int(TrackJungle.HW_HAIRPIN):
+			narrow_count += 1
+	_check("jungle: cinq segments de gadoue", mud_count == 5)
+	_check("jungle: longue section étroite des quatre épingles", narrow_count >= 25)
+
+	var catalog: Array[Dictionary] = TrackCatalog.list_tracks()
+	var found: bool = false
+	for entry in catalog:
+		if entry.get("uid", "") == TrackJungle.UID:
+			found = entry.get("nom", "") == TrackJungle.NOM and entry.get("auteur", "") == TrackJungle.AUTEUR
+	_check("jungle: présente au catalogue sous le nom et l'auteur demandés", found)
+
+	var crossing: bool = false
+	var n: int = track.point_count()
+	for i in range(n):
+		var i2: int = (i + 1) % n
+		var a := Vector2(Fixed.to_float(track.point_x[i]), Fixed.to_float(track.point_z[i]))
+		var b := Vector2(Fixed.to_float(track.point_x[i2]), Fixed.to_float(track.point_z[i2]))
+		for j in range(i + 1, n):
+			var j2: int = (j + 1) % n
+			if i == j or i2 == j or j2 == i:
+				continue
+			var c := Vector2(Fixed.to_float(track.point_x[j]), Fixed.to_float(track.point_z[j]))
+			var d := Vector2(Fixed.to_float(track.point_x[j2]), Fixed.to_float(track.point_z[j2]))
+			if Geometry2D.segment_intersects_segment(a, b, c, d) != null:
+				crossing = true
+	_check("jungle: aucun segment ne se croise", not crossing)
+	var visual := TrackMesh.new()
+	visual.build(track)
+	_check("jungle: mesh, vibreurs et décor procédural se construisent", visual.mesh != null and visual.get_child_count() >= 8)
+	visual.free()
+
+	var config := CarConfigGt.new()
+	config.bake()
+	var input := InputFrame.new()
+	var speed: int = Fixed.from_float(160.0 / 3.6 / float(Horloge.TICKS_PAR_SECONDE))
+	var dirt_track := Track.new()
+	dirt_track.est_ferme = false
+	dirt_track.add_point(0, 0, 0, Fixed.from_int(6), Track.Surface.TERRE)
+	dirt_track.add_point(0, 0, Fixed.from_int(50), Fixed.from_int(6), Track.Surface.TERRE)
+	var mud_track := Track.new()
+	mud_track.est_ferme = false
+	mud_track.add_point(0, 0, 0, Fixed.from_int(6), Track.Surface.BOUE)
+	mud_track.add_point(0, 0, Fixed.from_int(50), Fixed.from_int(6), Track.Surface.BOUE)
+	var dirt_state := CarState.new()
+	var mud_state := CarState.new()
+	dirt_state.reset(0, 0, 0, 0)
+	mud_state.reset(0, 0, 0, 0)
+	dirt_state.vit_z = speed
+	mud_state.vit_z = speed
+	var dirt_query := TrackQueryResult.new()
+	var mud_query := TrackQueryResult.new()
+	dirt_track.closest_point(0, 0, dirt_query)
+	mud_track.closest_point(0, 0, mud_query)
+	CarSim.tick(dirt_state, input, dirt_track, config, dirt_query)
+	CarSim.tick(mud_state, input, mud_track, config, mud_query)
+	_check("jungle: la gadoue ralentit davantage que la terre", mud_state.vit_z < dirt_state.vit_z and mud_state.vit_z > 0)
 
 func _initialize() -> void:
 	_test_fixed()
@@ -1288,6 +1358,7 @@ func _initialize() -> void:
 	_test_track_grouping_vehicule()
 	_test_bake_unites()
 	_test_configs_chargeables()
+	_test_jungle_dominante()
 	_test_horloge()
 	_test_regression()
 

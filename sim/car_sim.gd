@@ -1,7 +1,6 @@
 class_name CarSim
 
 static func tick(state: CarState, input: InputFrame, track: Track, config: CarConfig, query: TrackQueryResult) -> void:
-
 	_appliquer_elements(state, track, config)
 
 	var v: int = FixedMath.length_2d(state.vit_x, state.vit_z)
@@ -52,7 +51,7 @@ static func tick(state: CarState, input: InputFrame, track: Track, config: CarCo
 	var budget_illimite: bool = false
 	if state.glisse_etat == CarState.GlisseEtat.ARC:
 		var rayon_mod: int = Fixed.ONE - Fixed.mul(ReglesCommunes.correction_arc, input.braquage * state.glisse_sens)
-		rayon_mod = Fixed.max(rayon_mod, Fixed.ONE / 4)  
+		rayon_mod = Fixed.max(rayon_mod, Fixed.ONE / 4)
 		dpsi = state.glisse_sens * Fixed.div(Fixed.mul(v, config.arc_gain), rayon_mod)
 		budget_illimite = true
 	else:
@@ -109,6 +108,8 @@ static func tick(state: CarState, input: InputFrame, track: Track, config: CarCo
 	resist += Fixed.mul(Fixed.mul(config.perte_glisse, saturation), Fixed.abs(forward_speed))
 	if state.elem_plafond > 0 and Fixed.abs(forward_speed) > state.elem_plafond:
 		resist += ElementEffects.ralentit_resistance
+	if query.initialized and query.surface_kind == Track.Surface.BOUE and Fixed.abs(forward_speed) > ElementEffects.boue_plafond:
+		resist += ElementEffects.boue_resistance
 
 	if Fixed.abs(forward_speed) <= resist:
 		forward_speed = 0
