@@ -857,7 +857,7 @@ func _test_element_sans_effet() -> void:
 	var h_reference: int = _run_sequence_sur_piste(TrackHardcoded.build(), CarConfig.new(), seq)
 
 	var kinds_lot_b: Array = [
-		ElementRoster.Kind.MUR, ElementRoster.Kind.BARRIERE, ElementRoster.Kind.OBSTACLE_BLOQUANT,
+		ElementRoster.Kind.MUR, ElementRoster.Kind.BARRIERE,
 		ElementRoster.Kind.CHECKPOINT, ElementRoster.Kind.ROUTE_NORMALE, ElementRoster.Kind.LIGNE_DEPART_ARRIVEE,
 	]
 	for kind in kinds_lot_b:
@@ -1249,19 +1249,20 @@ func _test_configs_chargeables() -> void:
 func _test_jungle_dominante() -> void:
 	var track := TrackJungle.build()
 	track.prepare_progress(true)
-	_check("jungle: circuit fermé de 66 points", track.est_ferme and track.point_count() == 66)
-	_check("jungle: longueur calibrée entre 940 et 980 m",
-		track.total_length() >= Fixed.from_int(940) and track.total_length() <= Fixed.from_int(980))
+	_check("jungle: circuit fermé et fortement lissé", track.est_ferme and track.point_count() == TrackJungle.ANCHORS.size() * (TrackJungle.SMOOTH_STEPS + 1))
+	_check("jungle: longueur calibrée entre 900 et 1150 m",
+		track.total_length() >= Fixed.from_int(900) and track.total_length() <= Fixed.from_int(1150))
 	_check("jungle: thème visuel actif", track.visual_theme == "jungle")
-	var mud_count: int = 0
 	var narrow_count: int = 0
+	var dirt_count: int = 0
 	for i in range(track.point_count()):
-		if track.surface_kind[i] == Track.Surface.BOUE:
-			mud_count += 1
+		if track.surface_kind[i] == Track.Surface.TERRE:
+			dirt_count += 1
 		if track.half_width[i] == Fixed.from_int(TrackJungle.HW_HAIRPIN):
 			narrow_count += 1
-	_check("jungle: cinq segments de gadoue", mud_count == 5)
-	_check("jungle: longue section étroite des quatre épingles", narrow_count >= 25)
+	_check("jungle: toute la piste est en terre", dirt_count == track.point_count())
+	_check("jungle: longue section étroite des quatre épingles", narrow_count >= 70)
+	_check("jungle: six rochers bloquants", track.element_count() == TrackJungle.ROCKS.size())
 
 	var catalog: Array[Dictionary] = TrackCatalog.list_tracks()
 	var found: bool = false
@@ -1285,36 +1286,42 @@ func _test_jungle_dominante() -> void:
 			if Geometry2D.segment_intersects_segment(a, b, c, d) != null:
 				crossing = true
 	_check("jungle: aucun segment ne se croise", not crossing)
+	var routes_too_close: bool = false
+	var minimum_distance_sq: int = Fixed.mul(Fixed.from_int(18), Fixed.from_int(18))
+	for i in range(n):
+		for j in range(i + 1, n):
+			var index_distance: int = mini(j - i, n - (j - i))
+			if index_distance <= 12:
+				continue
+			var dx: int = track.point_x[i] - track.point_x[j]
+			var dz: int = track.point_z[i] - track.point_z[j]
+			if Fixed.mul(dx, dx) + Fixed.mul(dz, dz) < minimum_distance_sq:
+				routes_too_close = true
+	_check("jungle: les portions non voisines restent séparées", not routes_too_close)
+	var obstacle_query := TrackQueryResult.new()
+	var obstacles_on_track: bool = true
+	for i in range(track.element_count()):
+		track.closest_point(track.elem_x[i], track.elem_z[i], obstacle_query)
+		if Fixed.abs(obstacle_query.lateral_offset) > obstacle_query.half_width:
+			obstacles_on_track = false
+	_check("jungle: tous les rochers sont sur la piste", obstacles_on_track)
 	var visual := TrackMesh.new()
 	visual.build(track)
-	_check("jungle: mesh, vibreurs et décor procédural se construisent", visual.mesh != null and visual.get_child_count() >= 8)
+	_check("jungle: mesh, vibreurs, rochers et décor procédural se construisent", visual.mesh != null and visual.get_child_count() >= 13)
 	visual.free()
 
+func _test_element_obstacle_bloquant() -> void:
 	var config := CarConfigGt.new()
 	config.bake()
-	var input := InputFrame.new()
-	var speed: int = Fixed.from_float(160.0 / 3.6 / float(Horloge.TICKS_PAR_SECONDE))
-	var dirt_track := Track.new()
-	dirt_track.est_ferme = false
-	dirt_track.add_point(0, 0, 0, Fixed.from_int(6), Track.Surface.TERRE)
-	dirt_track.add_point(0, 0, Fixed.from_int(50), Fixed.from_int(6), Track.Surface.TERRE)
-	var mud_track := Track.new()
-	mud_track.est_ferme = false
-	mud_track.add_point(0, 0, 0, Fixed.from_int(6), Track.Surface.BOUE)
-	mud_track.add_point(0, 0, Fixed.from_int(50), Fixed.from_int(6), Track.Surface.BOUE)
-	var dirt_state := CarState.new()
-	var mud_state := CarState.new()
-	dirt_state.reset(0, 0, 0, 0)
-	mud_state.reset(0, 0, 0, 0)
-	dirt_state.vit_z = speed
-	mud_state.vit_z = speed
-	var dirt_query := TrackQueryResult.new()
-	var mud_query := TrackQueryResult.new()
-	dirt_track.closest_point(0, 0, dirt_query)
-	mud_track.closest_point(0, 0, mud_query)
-	CarSim.tick(dirt_state, input, dirt_track, config, dirt_query)
-	CarSim.tick(mud_state, input, mud_track, config, mud_query)
-	_check("jungle: la gadoue ralentit davantage que la terre", mud_state.vit_z < dirt_state.vit_z and mud_state.vit_z > 0)
+	var track: Track = _build_element_track(ElementRoster.Kind.OBSTACLE_BLOQUANT, 0, 0)
+	var state := CarState.new()
+	state.reset(0, 0, 0, 0)
+	state.vit_z = config.vitesse_max
+	var query := TrackQueryResult.new()
+	CarSim.tick(state, InputFrame.new(), track, config, query)
+	var distance: int = FixedMath.length_2d(state.pos_x, state.pos_z)
+	_check("obstacle bloquant: la voiture est arrêtée", state.vit_x == 0 and state.vit_z == 0)
+	_check("obstacle bloquant: la voiture est repoussée hors du rocher", distance >= ElementEffects.rayon_rocher - 2)
 
 func _initialize() -> void:
 	_test_fixed()
@@ -1343,6 +1350,7 @@ func _initialize() -> void:
 	_test_element_aimantee()
 	_test_element_obstacle_ralentit()
 	_test_element_obstacle_mortel()
+	_test_element_obstacle_bloquant()
 	_test_element_zones_ne_cumulent_pas()
 	_test_element_sans_effet()
 	_test_element_reset()

@@ -79,24 +79,39 @@ func _build_environment() -> void:
 	var jungle: bool = _track.visual_theme == "jungle"
 	var world_env := WorldEnvironment.new()
 	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color(0.055, 0.16, 0.105) if jungle else Color(0.32, 0.47, 0.66)
+	if jungle:
+		var sky := Sky.new()
+		var sky_material := ProceduralSkyMaterial.new()
+		sky_material.sky_top_color = Color(0.018, 0.012, 0.065)
+		sky_material.sky_horizon_color = Color(0.92, 0.205, 0.055)
+		sky_material.ground_bottom_color = Color(0.008, 0.018, 0.01)
+		sky_material.ground_horizon_color = Color(0.22, 0.055, 0.025)
+		sky_material.sky_curve = 0.18
+		sky_material.ground_curve = 0.12
+		sky_material.sun_angle_max = 9.0
+		sky_material.sun_curve = 0.08
+		sky.sky_material = sky_material
+		environment.background_mode = Environment.BG_SKY
+		environment.sky = sky
+	else:
+		environment.background_mode = Environment.BG_COLOR
+		environment.background_color = Color(0.32, 0.47, 0.66)
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.42, 0.62, 0.38) if jungle else Color(0.66, 0.76, 0.92)
-	environment.ambient_light_energy = 0.86 if jungle else 0.72
+	environment.ambient_light_color = Color(0.22, 0.13, 0.19) if jungle else Color(0.66, 0.76, 0.92)
+	environment.ambient_light_energy = 0.62 if jungle else 0.72
 	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	if jungle:
 		environment.fog_enabled = true
-		environment.fog_light_color = Color(0.18, 0.34, 0.20)
-		environment.fog_light_energy = 0.65
-		environment.fog_density = 0.0035
+		environment.fog_light_color = Color(0.28, 0.075, 0.055)
+		environment.fog_light_energy = 0.72
+		environment.fog_density = 0.0045
 	world_env.environment = environment
 	add_child(world_env)
 
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52.0, -28.0, 0.0)
-	sun.light_color = Color(1.0, 0.82, 0.48) if jungle else Color(1.0, 0.91, 0.76)
-	sun.light_energy = 1.5 if jungle else 1.25
+	sun.rotation_degrees = Vector3(-28.0, -112.0, 0.0) if jungle else Vector3(-52.0, -28.0, 0.0)
+	sun.light_color = Color(1.0, 0.28, 0.075) if jungle else Color(1.0, 0.91, 0.76)
+	sun.light_energy = 1.15 if jungle else 1.25
 	sun.shadow_enabled = true
 	add_child(sun)
 

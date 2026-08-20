@@ -4,12 +4,10 @@ const RAYON_ZONE_M: float = 6.0
 const RAYON_PAD_M: float = 3.0    
 const RAYON_PLOT_M: float = 2.0   
 const RAYON_VIDE_M: float = 4.0   
+const RAYON_ROCHER_M: float = 2.7
 
 const RALENTIT_PLAFOND_KMH: float = 95.0        
 const RALENTIT_RESISTANCE_MS2: float = 14.0   
-
-const BOUE_PLAFOND_KMH: float = 135.0
-const BOUE_RESISTANCE_MS2: float = 7.0
 
 const DEGRADE_AUTORITE: float = 0.45 
 
@@ -21,7 +19,7 @@ const MORTEL_PENALITE_KMH: float = 250.0
 const MORTEL_AUTORITE: float = 0.15        
 const MORTEL_CONTROLE_PERDU_S: float = 1.5  
 
-const RAMPE_HAUTEUR_M: float = 1.2  )
+const RAMPE_HAUTEUR_M: float = 1.2
 const RAMPE_DUREE_S: float = 0.7    
 
 
@@ -29,11 +27,10 @@ static var rayon_zone: int = Fixed.from_float(RAYON_ZONE_M)
 static var rayon_pad: int = Fixed.from_float(RAYON_PAD_M)
 static var rayon_plot: int = Fixed.from_float(RAYON_PLOT_M)
 static var rayon_vide: int = Fixed.from_float(RAYON_VIDE_M)
+static var rayon_rocher: int = Fixed.from_float(RAYON_ROCHER_M)
 
 static var ralentit_plafond: int = Fixed.from_float(RALENTIT_PLAFOND_KMH / 3.6 / float(Horloge.TICKS_PAR_SECONDE))
 static var ralentit_resistance: int = Fixed.from_float(RALENTIT_RESISTANCE_MS2 / float(Horloge.TICKS_PAR_SECONDE_CARRE))
-static var boue_plafond: int = Fixed.from_float(BOUE_PLAFOND_KMH / 3.6 / float(Horloge.TICKS_PAR_SECONDE))
-static var boue_resistance: int = Fixed.from_float(BOUE_RESISTANCE_MS2 / float(Horloge.TICKS_PAR_SECONDE_CARRE))
 static var degrade_autorite: int = Fixed.from_float(DEGRADE_AUTORITE)
 static var aimant_bonus: int = Fixed.from_float(AIMANT_BONUS_MS2 / float(Horloge.TICKS_PAR_SECONDE_CARRE))
 static var plot_penalite: int = Fixed.from_float(PLOT_PENALITE_KMH / 3.6 / float(Horloge.TICKS_PAR_SECONDE))
@@ -55,6 +52,7 @@ static func _build_rayons() -> PackedInt64Array:
 	r[ElementRoster.Kind.ROUTE_DEGRADE_CONTROLES] = rayon_zone
 	r[ElementRoster.Kind.ROUTE_AIMANTEE] = rayon_zone
 	r[ElementRoster.Kind.OBSTACLE_RALENTIT] = rayon_plot
+	r[ElementRoster.Kind.OBSTACLE_BLOQUANT] = rayon_rocher
 	r[ElementRoster.Kind.OBSTACLE_MORTEL] = rayon_plot
 	r[ElementRoster.Kind.VIDE] = rayon_vide
 	r[ElementRoster.Kind.RAMPE] = rayon_pad

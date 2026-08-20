@@ -108,9 +108,6 @@ static func tick(state: CarState, input: InputFrame, track: Track, config: CarCo
 	resist += Fixed.mul(Fixed.mul(config.perte_glisse, saturation), Fixed.abs(forward_speed))
 	if state.elem_plafond > 0 and Fixed.abs(forward_speed) > state.elem_plafond:
 		resist += ElementEffects.ralentit_resistance
-	if query.initialized and query.surface_kind == Track.Surface.BOUE and Fixed.abs(forward_speed) > ElementEffects.boue_plafond:
-		resist += ElementEffects.boue_resistance
-
 	if Fixed.abs(forward_speed) <= resist:
 		forward_speed = 0
 	else:
@@ -213,6 +210,24 @@ static func appliquer_penalite(state: CarState, penalite: int) -> void:
 		state.vit_z = Fixed.mul(state.vit_z, facteur)
 	state.bonus_vitesse = 0
 
+static func bloquer_obstacle(state: CarState, center_x: int, center_z: int) -> void:
+	var dx: int = state.pos_x - center_x
+	var dz: int = state.pos_z - center_z
+	var distance: int = FixedMath.length_2d(dx, dz)
+	var normal_x: int
+	var normal_z: int
+	if distance > 0:
+		normal_x = Fixed.div(dx, distance)
+		normal_z = Fixed.div(dz, distance)
+	else:
+		normal_x = -FixedMath.sin(state.yaw)
+		normal_z = -FixedMath.cos(state.yaw)
+	state.pos_x = center_x + Fixed.mul(normal_x, ElementEffects.rayon_rocher)
+	state.pos_z = center_z + Fixed.mul(normal_z, ElementEffects.rayon_rocher)
+	state.vit_x = 0
+	state.vit_z = 0
+	state.bonus_vitesse = 0
+
 static func _appliquer_elements(state: CarState, track: Track, config: CarConfig) -> void:
 	state.elem_coef_autorite = Fixed.ONE
 	state.elem_bonus_grip = 0
@@ -248,6 +263,8 @@ static func _appliquer_elements(state: CarState, track: Track, config: CarConfig
 				state.elem_coef_autorite = Fixed.min(state.elem_coef_autorite, ElementEffects.degrade_autorite)
 			ElementRoster.Kind.ROUTE_AIMANTEE:
 				state.elem_bonus_grip = Fixed.max(state.elem_bonus_grip, ElementEffects.aimant_bonus)
+			ElementRoster.Kind.OBSTACLE_BLOQUANT:
+				bloquer_obstacle(state, track.elem_x[i], track.elem_z[i])
 			ElementRoster.Kind.OBSTACLE_RALENTIT:
 				if entree:
 					appliquer_penalite(state, ElementEffects.plot_penalite)

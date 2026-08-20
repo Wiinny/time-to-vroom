@@ -3,7 +3,7 @@ class_name Track
 const LOCAL_SEARCH_BEHIND: int = 6
 const LOCAL_SEARCH_AHEAD: int = 12
 
-enum Surface { ASPHALTE, TERRE, BOUE }
+enum Surface { ASPHALTE, TERRE }
 
 var point_x: PackedInt64Array = PackedInt64Array()
 var point_y: PackedInt64Array = PackedInt64Array()
@@ -34,7 +34,7 @@ func add_point(x: int, y: int, z: int, hw: int, surface: int = Surface.ASPHALTE)
 	point_y.push_back(y)
 	point_z.push_back(z)
 	half_width.push_back(hw)
-	surface_kind.push_back(clampi(surface, Surface.ASPHALTE, Surface.BOUE))
+	surface_kind.push_back(clampi(surface, Surface.ASPHALTE, Surface.TERRE))
 	_progress_ready = false
 
 func element_count() -> int:
